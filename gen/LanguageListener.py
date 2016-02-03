@@ -1,4 +1,4 @@
-# Generated from /home/dantipov/PycharmProjects/compilers/Language.g4 by ANTLR 4.5.1
+# Generated from /home/dantipov/PycharmProjects/Compilers/Language.g4 by ANTLR 4.5.1
 from antlr4 import *
 if __name__ is not None and "." in __name__:
     from .LanguageParser import LanguageParser
@@ -266,6 +266,15 @@ class LanguageListener(ParseTreeListener):
 
     # Exit a parse tree produced by LanguageParser#returnValue.
     def exitReturnValue(self, ctx:LanguageParser.ReturnValueContext):
+        pass
+
+
+    # Enter a parse tree produced by LanguageParser#comment.
+    def enterComment(self, ctx:LanguageParser.CommentContext):
+        pass
+
+    # Exit a parse tree produced by LanguageParser#comment.
+    def exitComment(self, ctx:LanguageParser.CommentContext):
         pass
 
 

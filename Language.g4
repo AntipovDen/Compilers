@@ -13,8 +13,7 @@ The precedense of operators is the same as in java.
 
 
 program
-    : (function | thread | command)*
-    |
+    : (function | thread | command | comment)*
     ;
 
 
@@ -154,6 +153,9 @@ returnValue
     : 'return' (expression)?
     ;
 
+comment
+    : CommentText
+    ;
 //LEXER RULES
 
 VoidType    : 'void' ;
@@ -172,4 +174,6 @@ CompOp      : '==' | '!=' | '>' | '<' | '>=' | '<=';
 LowerName   : [a-z][A-Za-z0-9_]*;
 UpperName   : [A-Z][A-Za-z0-9_]*;
 
-WS          : [ \t\r\n]+ -> skip ; //skip spases, tabs and end of lines
+CommentText :  '#'.*'\n' ;
+
+WS          : [ \t\r\n]+ -> skip ;

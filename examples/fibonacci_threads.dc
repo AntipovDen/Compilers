@@ -1,0 +1,22 @@
+# it's VERY slow realization of Fibonacci numbers calculation, just for we can see the work of thread
+ also we don't care if we try to count Fibonacci number for non-positive numbers #
+
+int res = -1;
+
+int fib(int n)
+{
+    if n <= 2
+    {
+        return 1;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+thread T(int n)
+{
+    res = fib(n);
+}
+
+T(45);
+while res == -1 {} #here we would see the pause before thread will print result into the res
+write res;

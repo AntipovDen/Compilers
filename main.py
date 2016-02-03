@@ -1,15 +1,16 @@
 from antlr4 import *
+
+from Visitor import Visitor
 from gen.LanguageLexer import LanguageLexer
 from gen.LanguageParser import LanguageParser
 from gen.LanguageListener import LanguageListener
+from gen.LanguageVisitor import LanguageVisitor
 
-from example.startPrinter import StartPrinter
+from os import listdir
+from os.path import  isfile, join
 
-input = FileStream("input.txt")
-lexer = LanguageLexer(input)
-stream = CommonTokenStream(lexer)
-parser = LanguageParser(stream)
-tree = parser.program()
+
+
 
 class WalkPrinter(LanguageListener):
     def exitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
@@ -248,5 +249,16 @@ class WalkPrinter(LanguageListener):
         self.tabs += 1
 
 
-walker = ParseTreeWalker()
-walker.walk(WalkPrinter(), tree)
+
+
+
+# for filename in listdir("examples"):
+input = FileStream(join("examples", "helloworld.dc"))
+lexer = LanguageLexer(input)
+stream = CommonTokenStream(lexer)
+parser = LanguageParser(stream)
+tree = parser.program()
+Visitor().visit(tree)
+# walker = ParseTreeWalker()
+# walker.walk(WalkPrinter(), tree)
+print('------------------------------------------------------------------------------------')

@@ -1,0 +1,20 @@
+int power(int n, int k)
+{
+    int r = 1;
+    while k > 0
+    {
+        if k % 2 == 1
+        {
+            r = r * n;
+        }
+        n = n * n;
+        k = k / 2;
+    }
+    return r;
+}
+
+int a;
+int b;
+read a;
+read b;
+write power(a, b);
