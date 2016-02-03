@@ -174,6 +174,6 @@ CompOp      : '==' | '!=' | '>' | '<' | '>=' | '<=';
 LowerName   : [a-z][A-Za-z0-9_]*;
 UpperName   : [A-Z][A-Za-z0-9_]*;
 
-CommentText :  '#'.*'\n' ;
+CommentText :  '#'(~('\n'))*'\n' ;
 
 WS          : [ \t\r\n]+ -> skip ;

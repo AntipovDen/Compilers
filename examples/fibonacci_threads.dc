@@ -1,5 +1,5 @@
 # it's VERY slow realization of Fibonacci numbers calculation, just for we can see the work of thread
- also we don't care if we try to count Fibonacci number for non-positive numbers #
+# also we don't care if we try to count Fibonacci number for non-positive numbers
 
 int res = -1;
 
