@@ -78,7 +78,7 @@ varDeclaration
     ;
 
 unionDeclaration
-    : UnionType LowerName '{' (varDeclaration ';')+ '}'
+    : UnionType LowerName '{' (varType LowerName ('=' expression)? ';')+ '}'
     ;
 
 assignment
@@ -104,7 +104,6 @@ arithmExpr
 
 summand
     : mul (('*'|'/'|'%') mul)*
-    | mul
     ;
 
 mul
