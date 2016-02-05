@@ -25,7 +25,7 @@ class Visitor(LanguageVisitor):
         self.label_num = 0
         self.local_variable_num = -1
         # here will be stored methodName: retType, [arguments], [code lines]
-        self.methods = {'main': [self.VOID, [(self.STRING_ARR, 'args')], []]}
+        self.methods = {'main': [self.VOID, [(self.STRING_ARR, 'args')], [], 20, 20]} #TODO: understand the limits
         self.threads = {}  # here will be stored threadName: [arguments], [thread code lines])
         self.fields = {}  # here will be stored varName: varType
         self.current_method = 'main'
@@ -33,11 +33,12 @@ class Visitor(LanguageVisitor):
 
     def getNextLabelNum(self):
         self.label_num += 1
-        return self.label_num
+        return str(self.label_num)
 
     def getNextLocalVar(self):
         self.local_variable_num += 1
         return self.local_variable_num
+
     def visitTerminal(self, node):
         print('|   ' + node.getText())
 
@@ -52,7 +53,6 @@ class Visitor(LanguageVisitor):
     def buildCode(self, classname):
         code = []
         #TODO fields, threads
-        code.append(".source " + classname + ".dc")
         code.append(".class " + classname)
         code.append(".super java/lang/Object")
         code.append("")
@@ -62,7 +62,9 @@ class Visitor(LanguageVisitor):
             args = ""
             for arg in method_params[1]:
                 args += self.whichType(arg[0])
-            code.append(".method public static " + method + "(" + args + ")" + method_type)
+            code.append(".method public static " + method + " : (" + args + ")" + method_type)
+            code.append(".limit stack " + str(method_params[3]))
+            code.append(".limit locals " + str(method_params[4]))
             code += method_params[2]
             if method_type == 'V':
                 code.append("return")
@@ -152,8 +154,8 @@ class Visitor(LanguageVisitor):
                 expr_type = self.BOOL
                 true_label = 'Label' + self.getNextLabelNum()
                 exit_label = 'Label' + self.getNextLabelNum()
-                code += next_expr_code + ['if_icmp' + self.op_name[op] + true_label,
-                                          'iconst_0', 'goto' + exit_label, true_label + ':',
+                code += next_expr_code + ['if_icmp' + self.op_name[op] + ' ' +true_label,
+                                          'iconst_0', 'goto ' + exit_label, true_label + ':',
                                           'iconst_1', exit_label + ':']
         return expr_type, code
 
@@ -260,7 +262,7 @@ class Visitor(LanguageVisitor):
         # TODO: check children
         expr_type, expr_code = self.visitExpression(ctx.getChild(1))
         if expr_type == self.BOOL:
-            expr_type = 'B'
+            expr_type = 'Z'
         elif expr_type == self.INT:
             expr_type = 'I'
         elif expr_type == self.STRING:
@@ -268,7 +270,7 @@ class Visitor(LanguageVisitor):
         else:
             print('error')  # TODO: handle error
             exit(0)
-        return ['getstatic java/lang/System/out Ljava/io/PrintStream'] + expr_code + \
+        return ['getstatic java/lang/System/out Ljava/io/PrintStream;'] + expr_code + \
                ['invokevirtual java/io/PrintStream/print(' + expr_type + ')V']
 
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):

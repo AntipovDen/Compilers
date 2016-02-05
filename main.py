@@ -16,6 +16,7 @@ parser = LanguageParser(stream)
 tree = parser.program()
 v = Visitor()
 v.visit(tree)
-for s in v.buildCode("helloworld"):
-    print(s)
-print('------------------------------------------------------------------------------------')
+with open("out/helloworld.j", 'w') as f:
+    for s in v.buildCode("helloworld"):
+        f.write(s)
+        f.write('\n')
