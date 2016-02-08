@@ -14,9 +14,9 @@ lexer = LanguageLexer(input_stream)
 stream = CommonTokenStream(lexer)
 parser = LanguageParser(stream)
 tree = parser.program()
-v = Visitor()
+v = Visitor("helloworld")
 v.visit(tree)
 with open("out/helloworld.j", 'w') as f:
-    for s in v.buildCode("helloworld"):
+    for s in v.buildCode():
         f.write(s)
         f.write('\n')
