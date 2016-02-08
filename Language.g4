@@ -165,7 +165,7 @@ UnionType   : 'union' ;
 Thread      : 'thread' ;
 
 Integer     : '0' | [-]?[1-9][0-9]*;
-String      : [\"].*[\"];
+String      : '"'(~('"'))*'"';
 Bool        : 'true' | 'false';
 
 CompOp      : '==' | '!=' | '>' | '<' | '>=' | '<=';
@@ -173,6 +173,6 @@ CompOp      : '==' | '!=' | '>' | '<' | '>=' | '<=';
 LowerName   : [a-z][A-Za-z0-9_]*;
 UpperName   : [A-Z][A-Za-z0-9_]*;
 
-CommentText :  '#'(~('\n'))*'\n' ;
+CommentText :  '#'(~('\n'))*('\n'|EOF) ;
 
 WS          : [ \t\r\n]+ -> skip ;

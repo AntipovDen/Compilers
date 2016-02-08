@@ -26,6 +26,9 @@ class Visitor(LanguageVisitor):
         def __init__(self, arg_type=-1, name=None):
             self.type = arg_type
             self.name = name
+
+        def __eq__(self, other):
+            return self.type == other.type
           
     class Variable:
         def __init__(self, var_type=-1, name=None, local_number=0):
@@ -49,11 +52,7 @@ class Visitor(LanguageVisitor):
         self.label_num += 1
         return str(self.label_num)
 
-    def getNextLocalVar(self):
-        self.local_variable_num += 1
-        return self.local_variable_num
-
-    def whichType(self, int):
+    def typeToString(self, int_type):
         return 'V' if int == Visitor.VOID \
                 else 'Z' if int == Visitor.BOOL \
                 else 'I' if int == Visitor.INT  \
@@ -61,30 +60,48 @@ class Visitor(LanguageVisitor):
                 else '[Ljava/lang/String;' if int == Visitor.STRING_ARR  \
                 else None
 
-    def isVisible(self, var):
+    def typeFromParser(self, parser_type):
+        return self.BOOL if parser_type == LanguageParser.BoolType \
+            else self.INT if parser_type == LanguageParser.IntType \
+            else self.STRING if parser_type == LanguageParser.StringType \
+            else self.VOID if parser_type == LanguageParser.VoidType \
+            else None
+
+    def isVisible(self, var_name):
         for vis in self.visible_vars:
-            if var in vis:
+            if var_name in vis:
                 return True
         return False
 
-    def getNumber(self, var_name):
+    def getVarNumber(self, var_name):
         for vis in self.visible_vars:
             if var_name in vis:
                 return vis[var_name]
         return None
 
+    def checkArguments(self, arguments1, arguments2):
+        if len(arguments1) != len(arguments2):
+            return False
+        for i in range(len(arguments1)):
+            if arguments1[i] != arguments2[i]:
+                return False
+        return True
+
     def buildCode(self):
         code = []
-        #TODO fields, threads
+        #TODO threads
         code.append(".class " + self.classname)
         code.append(".super java/lang/Object")
         code.append("")
+        for field in self.fields:
+            code.append(".field public static " + field + ' ' + self.typeToString(self.fields[field]))
+        code.append("")
         for method in self.methods:
             method_params = self.methods[method]
-            method_type = self.whichType(method_params.return_type)
+            method_type = self.typeToString(method_params.return_type)
             args = ""
             for arg in method_params.arguments:
-                args += self.whichType(arg.type)
+                args += self.typeToString(arg.type)
             code.append(".method public static " + method + " : (" + args + ")" + method_type)
             code.append(".limit stack " + str(method_params.stack_limit))
             code.append(".limit locals " + str(len(method_params.locals) + len(method_params.arguments)))
@@ -110,37 +127,91 @@ class Visitor(LanguageVisitor):
         if rule_index == LanguageParser.RULE_write:
             self.methods[self.current_method].code += self.visitWrite(child)
         elif rule_index == LanguageParser.RULE_assignment:
-            self.methods[self.current_method].code += self.visitAssignment(child)
+            _, code = self.visitAssignment(child)
+            self.methods[self.current_method].code += code[:-1]
         elif rule_index == LanguageParser.RULE_varDeclaration:
             self.visitVarDeclaration(child)
 
     def visitAssignment(self, ctx: LanguageParser.AssignmentContext):
         var_name = ctx.getChild(0).getText()
         if var_name in self.fields:
-            expr_type, expr_code = self.visitExpression(ctx.getChild(3))
+            expr_type, expr_code = self.visitExpression(ctx.getChild(2))
             var_type = self.fields[var_name]
             if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                print("Can't assign " + self.whichType(expr_type) + " to the " +
-                      self.whichType(var_type) + " variable " + var_name)
-            self.methods[self.current_method].code += expr_code
-            self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
-                                                          ' ' + Visitor.whichType(var_type))
+                print("Can't assign " + self.typeToString(expr_type) + " to the " +
+                      self.typeToString(var_type) + " variable " + var_name)
+            expr_code.append("putstatic " + self.classname + '/' + var_name +
+                                                          ' ' + self.typeToString(var_type))
+            expr_code.append("getstatic " + self.classname + '/' + var_name +
+                                                          ' ' + self.typeToString(var_type))
+            return expr_type, expr_code
         elif self.isVisible(var_name):
-            expr_type, expr_code = self.visitExpression(ctx.getChild(3))
-            var_number = self.getNumber(var_name)
+            expr_type, expr_code = self.visitExpression(ctx.getChild(2))
+            var_number = self.getVarNumber(var_name)
             var_type = self.methods[self.current_method].locals[var_number].type
             if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                print("Can't assign " + self.whichType(expr_type) + " to the " +
-                      self.whichType(var_type) + " variable " + var_name)
-            self.methods[self.current_method].code += expr_code
+                print("Can't assign " + self.typeToString(expr_type) + " to the " +
+                      self.typeToString(var_type) + " variable " + var_name)
             if var_type in Visitor.PRIMITIVE:
-                self.methods[self.current_method].code.append("iload " + str(var_number))
+                expr_code.append("iload " + str(var_number))
+                expr_code.append("istore " + str(var_number))
             elif var_type == Visitor.STRING:
-                self.methods[self.current_method].code.append("aload " + str(var_number))
+                expr_code.append("aload " + str(var_number))
+                expr_code.append("astore " + str(var_number))
         else:
             print("No such visible variable: " + var_name)
             exit(0)
 
+    def visitVarDeclaration(self, ctx: LanguageParser.VarDeclarationContext):
+        # TODO:
+        # 1) check varname in local variables (or fields if we are in the main method)
+        # 2) add varname to local variables or to the method fields
+        # 3) if there is an assignment, do it.
+        var_type = ctx.getChild(0).getChild(0).getSymbol().type  # it's type in terms of Parser
+        if var_type == LanguageParser.BoolType:
+            var_type = Visitor.BOOL
+        elif var_type == LanguageParser.IntType:
+            var_type = Visitor.INT
+        elif var_type == LanguageParser.StringType:
+            var_type = Visitor.STRING
+        else:
+            print("error_type: " + str(var_type))
+            exit(0)
+        var_name = ctx.getChild(1).getText()
+        if self.current_method == 'main':
+            # add field
+            if var_name in self.fields:
+                print("global variable " + var_name + " has been defined twice");
+                exit(0)
+            self.fields[var_name] = var_type
+            if ctx.getChildCount() > 2:
+                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
+                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
+                    print("Can't assign " + self.typeToString(expr_type) + " to the " +
+                          self.typeToString(var_type) + " variable " + var_name)
+                self.methods[self.current_method].code += expr_code
+                self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
+                                                              ' ' + self.typeToString(var_type))
+        else:
+            # add var
+            if not self.isVisible(var_name):
+                print("local variable " + var_name + " has been defined twice");
+                exit(0)
+            var_number = len(self.methods[self.current_method].locals)
+            self.methods[self.current_method].locals.append(Visitor.Variable(var_type, var_name, var_number))
+            self.visible_vars[-1][var_name] = var_number
+            if ctx.getChildCount() > 2:
+                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
+                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
+                    print("Can't assign " + self.typeToString(expr_type) + " to the " +
+                          self.typeToString(var_type) + " variable " + var_name)
+                self.methods[self.current_method].code += expr_code
+                if var_type in Visitor.PRIMITIVE:
+                    self.methods[self.current_method].code.append("iload " + str(var_number))
+                elif var_type == Visitor.STRING:
+                    self.methods[self.current_method].code.append("aload " + str(var_number))
+
+    # everything about expressions
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
         # TODO: check children
         first_child = ctx.getChild(0)
@@ -282,9 +353,9 @@ class Visitor(LanguageVisitor):
 
         child = ctx.getChild(0)
         if hasattr(child, 'getRuleIndex'):
-            if child.getRuleIndex == LanguageParser.RULE_var:
+            if child.getRuleIndex() == LanguageParser.RULE_var:
                 return self.visitVar(child)
-            elif child.getRuleIndex == LanguageParser.RULE_funcCall:
+            elif child.getRuleIndex() == LanguageParser.RULE_funcCall:
                 return self.visitFuncCall(child)
             else:
                 print("error")
@@ -299,8 +370,26 @@ class Visitor(LanguageVisitor):
 
  # everithing below isn't yet realized
 
+    def visitVar(self, ctx: LanguageParser.VarContext):
+        var_name = ctx.getChild(0).getText()
+        if var_name in self.fields:
+            var_type = self.fields[var_name]
+            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + self.typeToString(var_type)]
+        elif self.isVisible(var_name):
+            var_number = self.getVarNumber(var_name)
+            var_type = self.methods[self.current_method].locals[var_number].type
+            if var_type in Visitor.PRIMITIVE:
+                code = 'iload' + (' ' if var_number > 3 else '_') + var_number
+            elif var_type == Visitor.STRING:
+                code = 'aload' + (' ' if var_number > 3 else '_') + var_number
+            return var_type, [code]
+        else:
+            print("Variable " + var_name + " is not visible")
+
+
+
     def visitVarType(self, ctx: LanguageParser.VarTypeContext):
-        return super().visitVarType(ctx)
+        return self.typeFromParser(ctx.getChild(0).getSymbol().type)
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
         return super().visitCallArguments(ctx)
@@ -311,11 +400,56 @@ class Visitor(LanguageVisitor):
     def visitTreadCall(self, ctx: LanguageParser.TreadCallContext):
         return super().visitTreadCall(ctx)
 
-    def visitArguments(self, ctx: LanguageParser.ArgumentsContext):
-        return super().visitArguments(ctx)
+    def visitFunctionDeclaration(self, ctx: LanguageParser.FunctionDeclarationContext):
+        func_type = self.visitFuncType(ctx.getChild(0))
+        func_name = ctx.getChild(1).getText()
+        if func_name in self.methods:
+            print("Function " + func_name + " is already defined")
+        func_arguments = self.visitArguments(ctx.getChild(3))
+        self.methods[func_name] = self.Method(func_type, func_arguments, None)
 
     def visitFunctionDefinition(self, ctx: LanguageParser.FunctionDefinitionContext):
-        return super().visitFunctionDefinition(ctx)
+        func_type = self.visitFuncType(ctx.getChild(0))
+        func_name = ctx.getChild(1).getText()
+        if func_name in self.methods:
+            if self.methods[func_name].code is not None:
+                print("Function " + func_name + " is already defined")
+        func_arguments = self.visitArguments(ctx.getChild(3))
+        if func_name in self.methods and not self.checkArguments(func_arguments, self.methods[func_name].arguments):
+            print("wrong arguments for " + func_name + " function definition")
+            exit(0)
+        locals = self.putArgumentsToLocals(func_arguments)
+        self.methods[func_name] = self.Method(func_type, func_arguments, [], locals, stack_limit=self.getStackLimitByArgs(func_arguments))
+        self.current_method = func_name
+        self.visitBlock(ctx.getChild(5))
+        if func_type == self.VOID:
+            self.methods[func_name].code.append("return")
+        self.current_method = 'main'  # TODO: don't forget to fix it during the threading
+
+    def visitFuncType(self, ctx: LanguageParser.FuncTypeContext):
+        child = ctx.getChild(0)
+        if hasattr(child, "getRuleIndex"):
+            return self.typeFromParser(child.getChild(0).getSymbol.type)
+        elif child.getSymbol().type == LanguageParser.VoidType:
+            return self.VOID
+        else:
+            print("illegal function type: " + child.getText())
+            exit(0)
+
+    def visitArguments(self, ctx: LanguageParser.ArgumentsContext):
+        arguments = []
+        for i in range((ctx.getChildCount() + 1) // 2):
+            arguments.append(self.visitArgument(ctx.getChild(i * 2 + 1)))
+        return arguments
+
+    def visitArgument(self, ctx: LanguageParser.ArgumentContext):
+        return self.Argument(self.visitVarType(ctx.getChild(0)), ctx.getChild(1).getText())
+
+    def visitBlock(self, ctx: LanguageParser.BlockContext):
+        self.visible_vars.append({})
+        for i in range(1, ctx.getChildCount() - 1):
+            ctx.getChild(i).accept()
+        self.visible_vars.pop()  # TODO: think about declaring new vars of the same name in the invisible for each other areas
 
     def visitWrite(self, ctx: LanguageParser.WriteContext):
         # TODO: check children
@@ -335,58 +469,6 @@ class Visitor(LanguageVisitor):
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
         return super().visitReturnValue(ctx)
 
-    def visitVarDeclaration(self, ctx: LanguageParser.VarDeclarationContext):
-        # TODO:
-        # 1) check varname in local variables (or fields if we are in the main method)
-        # 2) add varname to local variables or to the method fields
-        # 3) if there is an assignment, do it.
-        var_type = ctx.getChild(0).getChild(0).getSymbol().type  # it's type in terms of Parser
-        if var_type == LanguageParser.BoolType:
-            var_type = Visitor.BOOL
-        elif var_type == LanguageParser.IntType:
-            var_type = Visitor.INT
-        elif var_type == LanguageParser.StringType:
-            var_type = Visitor.STRING
-        else:
-            print("error_type: " + str(var_type))
-            exit(0)
-        var_name = ctx.getChild(1).getText()
-        if self.current_method == 'main':
-            # add field
-            if var_name in self.fields:
-                print("global variable " + var_name + " has been defined twice");
-                exit(0)
-            self.fields[var_name] = var_type
-            if ctx.getChildCount() > 2:
-                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                    print("Can't assign " + self.whichType(expr_type) + " to the " +
-                          self.whichType(var_type) + " variable " + var_name)
-                self.methods[self.current_method].code += expr_code
-                self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
-                                                              ' ' + self.whichType(var_type))
-        else:
-            # add var
-            if not self.isVisible(var_name):
-                print("local variable " + var_name + " has been defined twice");
-                exit(0)
-            var_number = len(self.methods[self.current_method].locals)
-            self.methods[self.current_method].locals.append(Visitor.Variable(var_type, var_name, var_number))
-            self.visible_vars[-1][var_name] = var_number
-            if ctx.getChildCount() > 2:
-                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                    print("Can't assign " + self.whichType(expr_type) + " to the " +
-                          self.whichType(var_type) + " variable " + var_name)
-                self.methods[self.current_method].code += expr_code
-                if var_type in Visitor.PRIMITIVE:
-                    self.methods[self.current_method].code.append("iload " + str(var_number))
-                elif var_type == Visitor.STRING:
-                    self.methods[self.current_method].code.append("aload " + str(var_number))
-
-
-
-
     def visitFunction(self, ctx: LanguageParser.FunctionContext):
         return super().visitFunction(ctx)
 
@@ -396,33 +478,8 @@ class Visitor(LanguageVisitor):
     def visitFuncCall(self, ctx: LanguageParser.FuncCallContext):
         return super().visitFuncCall(ctx)
 
-    def visitVar(self, ctx: LanguageParser.VarContext):
-        var_name = ctx.getChild(0).getText()
-        if var_name in self.fields:
-            var_type = self.fields[var_name]
-            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + Visitor.whichType(var_type)]
-        elif self.isVisible(var_name):
-            var_number = self.getNumber(var_name)
-            var_type = self.methods[self.current_method].locals[var_number].type
-            if var_type in Visitor.PRIMITIVE:
-                code = 'iload' + (' ' if var_number > 3 else '_') + var_number
-            elif var_type == Visitor.STRING:
-                code = 'aload' + (' ' if var_number > 3 else '_') + var_number
-            return var_type, [code]
-        else:
-            print("Variable " + var_name + " is not visible")
-
-    def visitFuncType(self, ctx: LanguageParser.FuncTypeContext):
-        return super().visitFuncType(ctx)
-
     def visitThread(self, ctx: LanguageParser.ThreadContext):
         return super().visitThread(ctx)
-
-    def visitBlock(self, ctx: LanguageParser.BlockContext):
-        return super().visitBlock(ctx)
-
-    def visitArgument(self, ctx: LanguageParser.ArgumentContext):
-        return super().visitArgument(ctx)
 
     def visitUnionDeclaration(self, ctx: LanguageParser.UnionDeclarationContext):
         return super().visitUnionDeclaration(ctx)
@@ -430,9 +487,7 @@ class Visitor(LanguageVisitor):
     def visitCycle(self, ctx: LanguageParser.CycleContext):
         return super().visitCycle(ctx)
 
-    def visitFunctionDeclaration(self, ctx: LanguageParser.FunctionDeclarationContext):
-        return super().visitFunctionDeclaration(ctx)
-
     def visitRead(self, ctx: LanguageParser.ReadContext):
         return super().visitRead(ctx)
+
 

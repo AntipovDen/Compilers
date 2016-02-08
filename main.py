@@ -1,5 +1,6 @@
 from antlr4 import *
 
+from VisitorPrinter import VisitorPrinter
 from Visitor import Visitor
 from gen.LanguageLexer import LanguageLexer
 from gen.LanguageParser import LanguageParser
@@ -15,6 +16,7 @@ stream = CommonTokenStream(lexer)
 parser = LanguageParser(stream)
 tree = parser.program()
 v = Visitor("helloworld")
+# v = VisitorPrinter()
 v.visit(tree)
 with open("out/helloworld.j", 'w') as f:
     for s in v.buildCode():
