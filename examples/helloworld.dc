@@ -1,11 +1,11 @@
 str s = "helloworld\n";
 int a;
 
-a = 4 + 3;
-int b = a * 2;
-write a;
+void f();
 
-write "\n";
-write b;
-write "\n";
-write s;
+void f()
+{
+    write "function call";
+}
+
+f();
