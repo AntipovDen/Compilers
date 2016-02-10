@@ -1,10 +1,10 @@
 void inc(int a);
+        int a = 0;
 
 void inc(int a)
 {
     while a > 0
     {
-        int a = 0;
         write a;
         write "\n";
         a = a - 1;

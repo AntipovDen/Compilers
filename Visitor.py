@@ -48,10 +48,18 @@ class Visitor(LanguageVisitor):
         self.fields = {}  # fields are stored as name: type
         self.visible_vars = [] # maps name: number
         self.classname = classname
+        self.unions = {} # name: fields, where fields is {field_name: field type}
+        self.union_length = {}
 
     def getNextLabelNum(self):
         self.label_num += 1
         return str(self.label_num)
+
+    def typeLen(self, var_type):
+        if var_type in self.PRIMITIVE or var_type == self.STRING:
+            return 1
+        else:
+            return 0
 
     def typeToString(self, int_type):
         return 'V' if int_type == Visitor.VOID \
@@ -575,7 +583,8 @@ class Visitor(LanguageVisitor):
         return super().visitThread(ctx)
 
     def visitUnionDeclaration(self, ctx: LanguageParser.UnionDeclarationContext):
-        return super().visitUnionDeclaration(ctx)
+        name = ctx.getChild(1).getText()
+        #TODO: rebuild grammar so that children are just unionField nodes
 
     def visitCycle(self, ctx: LanguageParser.CycleContext):
         expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))  # TODO: check type
