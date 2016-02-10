@@ -44,8 +44,7 @@ class Visitor(LanguageVisitor):
         self.methods = {'main': Visitor.Method(return_type=Visitor.VOID,
                                                arguments=[Visitor.Argument(arg_type=Visitor.STRING_ARR, name = 'args')],
                                                code =[],
-                                               locals=[self.STRING],
-                                               stack_limit=20)}
+                                               locals=[self.STRING])}
         self.fields = {}  # fields are stored as name: type
         self.visible_vars = [] # maps name: number
         self.classname = classname
@@ -138,15 +137,24 @@ class Visitor(LanguageVisitor):
         if rule_index == LanguageParser.RULE_write:
             self.methods[self.current_method].code += self.visitWrite(child)
         elif rule_index == LanguageParser.RULE_assignment:
-            _, code = self.visitAssignment(child)
+            _, code, stack_limit = self.visitAssignment(child)
             self.methods[self.current_method].code += code[:-1]
+            self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
         elif rule_index == LanguageParser.RULE_varDeclaration:
             self.visitVarDeclaration(child)
         elif rule_index == LanguageParser.RULE_funcCall:
-            return_type, code = self.visitFuncCall(child)
+            return_type, code, stack_limit = self.visitFuncCall(child)
             if return_type != self.VOID:
                 code.append("pop")
             self.methods[self.current_method].code += code
+            self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
+        elif rule_index == LanguageParser.RULE_returnValue:
+            self.visitReturnValue(child)
+        elif rule_index == LanguageParser.RULE_condition:
+            self.visitCondition(child)
+        elif rule_index == LanguageParser.RULE_cycle:
+            self.visitCycle(child)
+
 
     # Assignment statement that leaves the value of the variable on the top of stack
     def visitAssignment(self, ctx: LanguageParser.AssignmentContext):
@@ -159,11 +167,11 @@ class Visitor(LanguageVisitor):
                 print("Can't assign " + self.typeToString(expr_type) + " to the " +
                       self.typeToString(var_type) + " variable " + var_name)
             if var_type in Visitor.PRIMITIVE:
-                expr_code.append("iload" + (' ' if var_number > 3 else '_') + str(var_number))
                 expr_code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
+                expr_code.append("iload" + (' ' if var_number > 3 else '_') + str(var_number))
             elif var_type == Visitor.STRING:
-                expr_code.append("aload" + (' ' if var_number > 3 else '_') + str(var_number))
                 expr_code.append("astore" + (' ' if var_number > 3 else '_') + str(var_number))
+                expr_code.append("aload" + (' ' if var_number > 3 else '_') + str(var_number))
             return expr_type, expr_code, stack_limit
         elif var_name in self.fields:
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(2))
@@ -192,35 +200,38 @@ class Visitor(LanguageVisitor):
         if self.current_method == 'main':
             # add field
             if var_name in self.fields:
-                print("global variable " + var_name + " has been defined twice");
+                print("global variable " + var_name + " has been defined twice")
                 exit(0)
             self.fields[var_name] = var_type
             if ctx.getChildCount() > 2:
-                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
+                expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
                 if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
                     print("Can't assign " + self.typeToString(expr_type) + " to the " +
                           self.typeToString(var_type) + " variable " + var_name)
                 self.methods[self.current_method].code += expr_code
                 self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
                                                               ' ' + self.typeToString(var_type))
+                self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
         else:
             # add var
             if self.isVisible(var_name):
-                print("local variable " + var_name + " has been defined twice");
+                print("local variable " + var_name + " has been defined twice")
                 exit(0)
             var_number = len(self.methods[self.current_method].locals)
             self.methods[self.current_method].locals.append(var_type)
             self.visible_vars[-1][var_name] = var_number
             if ctx.getChildCount() > 2:
-                expr_type, expr_code = self.visitExpression(ctx.getChild(3))
+                expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
                 if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
                     print("Can't assign " + self.typeToString(expr_type) + " to the " +
                           self.typeToString(var_type) + " variable " + var_name)
                 self.methods[self.current_method].code += expr_code
                 if var_type in Visitor.PRIMITIVE:
-                    self.methods[self.current_method].code.append("iload" + (' ' if var_number > 3 else '_') + str(var_number))
+                    self.methods[self.current_method].code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
                 elif var_type == Visitor.STRING:
-                    self.methods[self.current_method].code.append("aload" + (' ' if var_number > 3 else '_') + str(var_number))
+                    self.methods[self.current_method].code.append("astore" + (' ' if var_number > 3 else '_') + str(var_number))
+                self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit + 1)
+
 
     # everything about expressions
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
@@ -386,17 +397,20 @@ class Visitor(LanguageVisitor):
 
     def visitVar(self, ctx: LanguageParser.VarContext):
         var_name = ctx.getChild(0).getText()
-        if var_name in self.fields:
-            var_type = self.fields[var_name]
-            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + self.typeToString(var_type)], 1  # TODO: depends on variable type
-        elif self.isVisible(var_name):
+        if self.isVisible(var_name):
             var_number = self.getVarNumber(var_name)
-            var_type = self.methods[self.current_method].locals[var_number].type
+            var_type = self.methods[self.current_method].locals[var_number]
             if var_type in Visitor.PRIMITIVE:
                 code = 'iload' + (' ' if var_number > 3 else '_') + str(var_number)
             elif var_type == Visitor.STRING:
                 code = 'aload' + (' ' if var_number > 3 else '_') + str(var_number)
+            else:
+                print("Wrong variable type")
+                exit(0)
             return var_type, [code], 1  # TODO: depends on variable type
+        elif var_name in self.fields:
+            var_type = self.fields[var_name]
+            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + self.typeToString(var_type)], 1  # TODO: depends on variable type
         else:
             print("Variable " + var_name + " is not visible")
             exit(0)
@@ -423,13 +437,13 @@ class Visitor(LanguageVisitor):
         for arg_code in arg_codes:
             code += arg_code
         code.append("invokestatic " + self.classname + '/' + func_name + '(' + "".join([self.typeToString(i) for i in arg_types]) + ')' + self.typeToString(method.return_type))
-        return method.return_type, code
+        return method.return_type, code, stack_limit
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
         types, expressions = [], []
         stack_limit = 0
         for i in range((ctx.getChildCount() + 1) // 2):
-            expr_type, expr_code, expr_stack_limit = self.visitExpression(ctx.getChild(2 * i + 1))
+            expr_type, expr_code, expr_stack_limit = self.visitExpression(ctx.getChild(2 * i))
             types.append(expr_type)
             expressions.append(expr_code)
             stack_limit = max(stack_limit, expr_stack_limit + i)
@@ -441,7 +455,22 @@ class Visitor(LanguageVisitor):
 
 
     def visitCondition(self, ctx: LanguageParser.ConditionContext):
-        return super().visitCondition(ctx)
+        expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))  # TODO: check type
+        cur_method = self.methods[self.current_method]
+        cur_method.stack_limit = max(cur_method.stack_limit, stack_limit)
+        false_label = "Label" + str(self.getNextLabelNum())
+        cur_method.code += expr_code
+        cur_method.code.append("ifeq " + false_label)
+        self.visitBlock(ctx.getChild(2))
+        if ctx.getChildCount() > 3:
+            exit_label = "Label" + str(self.getNextLabelNum())
+            cur_method.code.append("goto " + exit_label)
+            cur_method.code.append(false_label + ":")
+            self.visitBlock(ctx.getChild(4))
+            cur_method.code.append(exit_label + ":")
+        else:
+            cur_method.code.append(false_label + ":")
+
 
     def visitTreadCall(self, ctx: LanguageParser.TreadCallContext):
         return super().visitTreadCall(ctx)
@@ -478,7 +507,7 @@ class Visitor(LanguageVisitor):
     def visitFuncType(self, ctx: LanguageParser.FuncTypeContext):
         child = ctx.getChild(0)
         if hasattr(child, "getRuleIndex"):
-            return self.typeFromParser(child.getChild(0).getSymbol.type)
+            return self.typeFromParser(child.getChild(0).getSymbol().type)
         elif child.getSymbol().type == LanguageParser.VoidType:
             return self.VOID
         else:
@@ -488,7 +517,7 @@ class Visitor(LanguageVisitor):
     def visitArguments(self, ctx: LanguageParser.ArgumentsContext):
         arguments = []
         for i in range((ctx.getChildCount() + 1) // 2):
-            arguments.append(self.visitArgument(ctx.getChild(i * 2 + 1)))
+            arguments.append(self.visitArgument(ctx.getChild(i * 2)))
         return arguments
 
     def visitArgument(self, ctx: LanguageParser.ArgumentContext):
@@ -502,7 +531,7 @@ class Visitor(LanguageVisitor):
 
     def visitWrite(self, ctx: LanguageParser.WriteContext):
         # TODO: check children
-        expr_type, expr_code = self.visitExpression(ctx.getChild(1))
+        expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
         if expr_type == Visitor.BOOL:
             expr_type = 'Z'
         elif expr_type == Visitor.INT:
@@ -512,11 +541,27 @@ class Visitor(LanguageVisitor):
         else:
             print('error')  # TODO: handle error
             exit(0)
+        self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit + 1)
         return ['getstatic java/lang/System/out Ljava/io/PrintStream;'] + expr_code + \
                ['invokevirtual java/io/PrintStream/print(' + expr_type + ')V']
 
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
-        return super().visitReturnValue(ctx)
+        ret_type = self.methods[self.current_method].return_type
+        if ctx.getChildCount() == 1:
+            if self.methods[self.current_method].return_type != self.VOID:
+                print("Function " + self.current_method + " can not return void value")
+                exit(0)
+            self.methods[self.current_method].code.append("return")
+        else:
+            expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
+            if ret_type != expr_type and (ret_type not in self.PRIMITIVE or expr_type not in self.PRIMITIVE):
+                print("Wrong return type for function " + self.current_method)
+                exit(0)
+            self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
+            expr_code.append("ireturn" if ret_type in self.PRIMITIVE else "areturn" if ret_type == self.STRING else None)
+            self.methods[self.current_method].code += expr_code
+
+
 
     def visitFunction(self, ctx: LanguageParser.FunctionContext):
         return super().visitFunction(ctx)
@@ -533,7 +578,17 @@ class Visitor(LanguageVisitor):
         return super().visitUnionDeclaration(ctx)
 
     def visitCycle(self, ctx: LanguageParser.CycleContext):
-        return super().visitCycle(ctx)
+        expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))  # TODO: check type
+        cur_method = self.methods[self.current_method]
+        cur_method.stack_limit = max(cur_method.stack_limit, stack_limit)
+        start_label = "Label" + str(self.getNextLabelNum())
+        exit_label = "Label" + str(self.getNextLabelNum())
+        cur_method.code.append(start_label + ":")
+        cur_method.code += expr_code
+        cur_method.code.append("ifeq " + exit_label)
+        self.visitBlock(ctx.getChild(2))
+        cur_method.code.append("goto " + start_label)
+        cur_method.code.append(exit_label + ":")
 
     def visitRead(self, ctx: LanguageParser.ReadContext):
         return super().visitRead(ctx)

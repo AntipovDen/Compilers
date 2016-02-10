@@ -1,11 +1,14 @@
-str s = "helloworld\n";
-int a;
+void inc(int a);
 
-void f();
-
-void f()
+void inc(int a)
 {
-    write "function call";
+    while a > 0
+    {
+        int a = 0;
+        write a;
+        write "\n";
+        a = a - 1;
+    }
 }
 
-f();
+inc(10);
