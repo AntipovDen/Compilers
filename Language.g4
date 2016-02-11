@@ -86,7 +86,7 @@ unionField
     ;
 
 assignment
-    : LowerName '=' expression
+    : LowerName ('.' LowerName)? '=' expression
     ;
 
 expression

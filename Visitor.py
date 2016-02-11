@@ -164,18 +164,42 @@ class Visitor(LanguageVisitor):
             self.visitCondition(child)
         elif rule_index == LanguageParser.RULE_cycle:
             self.visitCycle(child)
+        elif rule_index == LanguageParser.RULE_unionDeclaration:
+            self.visitUnionDeclaration(child)
 
 
     # Assignment statement that leaves the value of the variable on the top of stack
     def visitAssignment(self, ctx: LanguageParser.AssignmentContext):
         var_name = ctx.getChild(0).getText()
-        if self.isVisible(var_name):
+
+        if ctx.getChildCount() > 3:
+            var_field = ctx.getChild(2).getText()
+            expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(4))
+        else:
+            var_field = None
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(2))
+
+        if self.isVisible(var_name):
             var_number = self.getVarNumber(var_name)
             var_type = self.methods[self.current_method].locals[var_number]
+            if var_type == self.UNION:
+                if var_field is None:
+                    print("You should specify the field of union " + var_name)
+                    exit(0)
+                if var_field in self.unions[var_name]:
+                    var_type = self.unions[var_name][var_field]
+                else:
+                    print("Wrong field name for union " + var_name + ": " + var_field)
+                    exit(0)
+            else:
+                if var_field is not None:
+                    print("Only unions can have fields, not variable " + var_name)
+
+            # TODO: this check will be more comlicated after introduing doubles and longs
             if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
                 print("Can't assign " + self.typeToString(expr_type) + " to the " +
                       self.typeToString(var_type) + " variable " + var_name)
+            # TODO: this also will be more complicated
             if var_type in Visitor.PRIMITIVE:
                 expr_code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
                 expr_code.append("iload" + (' ' if var_number > 3 else '_') + str(var_number))
@@ -184,15 +208,16 @@ class Visitor(LanguageVisitor):
                 expr_code.append("aload" + (' ' if var_number > 3 else '_') + str(var_number))
             return expr_type, expr_code, stack_limit
         elif var_name in self.fields:
-            expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(2))
+            if var_field is not None:
+                print("Global variables like " + var_name + " can't be unions, so they can't have fields")
+                exit(0)
             var_type = self.fields[var_name]
+            # TODO: And so will it
             if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
                 print("Can't assign " + self.typeToString(expr_type) + " to the " +
                       self.typeToString(var_type) + " variable " + var_name)
-            expr_code.append("putstatic " + self.classname + '/' + var_name +
-                                                          ' ' + self.typeToString(var_type))
-            expr_code.append("getstatic " + self.classname + '/' + var_name +
-                                                          ' ' + self.typeToString(var_type))
+            expr_code.append("putstatic " + self.classname + '/' + var_name + ' ' + self.typeToString(var_type))
+            expr_code.append("getstatic " + self.classname + '/' + var_name + ' ' + self.typeToString(var_type))
             return expr_type, expr_code, stack_limit
         else:
             print("No such visible variable: " + var_name)
@@ -407,9 +432,23 @@ class Visitor(LanguageVisitor):
 
     def visitVar(self, ctx: LanguageParser.VarContext):
         var_name = ctx.getChild(0).getText()
+        if ctx.getChildCount() > 1:
+            var_field = ctx.getChild(2).getText()
+        else:
+            var_field = None
         if self.isVisible(var_name):
             var_number = self.getVarNumber(var_name)
             var_type = self.methods[self.current_method].locals[var_number]
+            if var_type == self.UNION:
+                if var_field is None:
+                    print("You can't access union " + var_name + " without specifying it's field")
+                    exit(0)
+                elif var_field not in self.unions[var_name]:
+                    print("Union " + var_name + " has no field " + var_field)
+                    exit(0)
+                else:
+                    var_type = self.unions[var_name][var_field]
+
             if var_type in Visitor.PRIMITIVE:
                 code = 'iload' + (' ' if var_number > 3 else '_') + str(var_number)
             elif var_type == Visitor.STRING:
@@ -419,6 +458,9 @@ class Visitor(LanguageVisitor):
                 exit(0)
             return var_type, [code], 1  # TODO: depends on variable type
         elif var_name in self.fields:
+            if var_field is not None:
+                print("Global variables like " + var_name + " can't be unions, so they can't have fields")
+                exit(0)
             var_type = self.fields[var_name]
             return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + self.typeToString(var_type)], 1  # TODO: depends on variable type
         else:
@@ -608,7 +650,7 @@ class Visitor(LanguageVisitor):
         method_locals += [self.UNION] * union_size
 
     def visitUnionField(self, ctx: LanguageParser.UnionFieldContext):
-        return self.typeFromParser(ctx.getChild(0).getSymbol().type), ctx.getChild(1).getText()
+        return self.visitVarType(ctx.getChild(0)), ctx.getChild(1).getText()
 
     def visitCycle(self, ctx: LanguageParser.CycleContext):
         expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))  # TODO: check type

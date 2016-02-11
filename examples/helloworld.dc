@@ -1,14 +1,11 @@
-void inc(int a);
-        int a = 0;
 
-void inc(int a)
-{
-    while a > 0
-    {
-        write a;
-        write "\n";
-        a = a - 1;
-    }
-}
+union a {
+ int a;
+ str b;
+};
 
-inc(10);
+a.b = "helloworld";
+write a.b;
+
+a.a = 1;
+write a.a;

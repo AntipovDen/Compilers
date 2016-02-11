@@ -127,6 +127,11 @@ class VisitorPrinter(LanguageVisitor):
         super().visitChildren(ctx)
         self.tabs -= 1
 
+    def visitUnionField(self, ctx: LanguageParser.UnionFieldContext):
+        print('|   ' * self.tabs + "UnionField")
+        self.tabs += 1
+        super().visitChildren(ctx)
+        self.tabs -= 1
 
     def visitArguments(self, ctx: LanguageParser.ArgumentsContext):
         print('|   ' * self.tabs + "Arguments")
