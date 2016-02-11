@@ -2,53 +2,119 @@ from gen.LanguageVisitor import LanguageVisitor
 from gen.LanguageParser import LanguageParser
 
 
+# Constants
+BOOL = 0
+INT = 1
+STRING = 2
+UNION = 3
+VOID = 4
+STRING_ARR = 5
+LONG = 6
+FLOAT = 7
+DOUBLE = 8
+PRIMITIVE = (0, 1)
+LONG_TYPES = (6, 7)
+OP_NAME = {'==': 'eq', '!=': 'ne', '>': 'gt', '<': 'lt', '>=': 'ge', '<=': 'le'}
+TYPE_DESCRIPTOR = {BOOL: 'Z', INT: 'I', STRING: 'Ljava/lang/string', STRING_ARR: '[Ljava/lang/string',
+                   LONG: 'J', FLOAT: 'F', DOUBLE: 'D', VOID: 'V'}
+TYPE_LETTER = {BOOL: 'i', INT: 'i', LONG: 'l', FLOAT: 'f', DOUBLE: 'd'}
+PARSER_TYPE = {LanguageParser.VoidType: VOID, LanguageParser.BoolType: BOOL, LanguageParser.IntType: INT,
+               LanguageParser.LongType: LONG, LanguageParser.FloatType: FLOAT, LanguageParser.DoubleType: DOUBLE,
+               LanguageParser.StringType: STRING}
+CONST_TYPE = {LanguageParser.String: STRING, LanguageParser.Bool: BOOL, LanguageParser.Integer: INT,
+              LanguageParser.Long: LONG, LanguageParser.Float: FLOAT, LanguageParser.Double: DOUBLE}
+
+
+class Method:
+    def __init__(self, return_type=-1, arguments=None, code=None, locals=None, stack_limit=0):
+        self.return_type = return_type
+        self.arguments = arguments if arguments is not None else []
+        self.code = code if code is not None else []
+        self.locals = locals if locals is not None else []
+        self.stack_limit = stack_limit
+
+
+class Argument:
+    def __init__(self, arg_type=-1, name=None):
+        self.type = arg_type
+        self.name = name
+
+    def __eq__(self, other):
+        return self.type == other.type
+      
+
+class Variable:
+    def __init__(self, var_type=-1, name=None, local_number=0):
+        self.type = var_type
+        self.name = name
+        self.local_number = local_number
+
+
+def typeLen(var_type):
+    if var_type in (BOOL, INT, STRING, FLOAT):
+        return 1
+    elif var_type in LONG_TYPES:
+        return 2
+    else:
+        print("Unknown type number " + str(var_type))
+        exit(0)
+
+
+def typeToString(input_type):
+    if input_type in TYPE_DESCRIPTOR:
+        return TYPE_DESCRIPTOR[input_type]
+    return None
+
+
+def typeFromParser(parser_type):
+    if parser_type in PARSER_TYPE:
+        return  PARSER_TYPE[parser_type]
+    return None
+
+
+def constTypeFromParser(parser_type):
+    if parser_type in CONST_TYPE:
+        return CONST_TYPE[parser_type]
+    return None
+
+
+def checkArguments(arguments1, arguments2):
+    if len(arguments1) != len(arguments2):
+        return False
+    for i in range(len(arguments1)):
+        if arguments1[i] != arguments2[i]:
+            return False
+    return True
+
+
+def operationResultType(type1, type2):
+    if type1 == type2:
+        return type1
+    if type1 == FLOAT or type2 == FLOAT:
+        return DOUBLE
+    return max(type1, type2)  # soppose that constants are in following order: BOOL < INT < LONG < DOUBLE
+
+
+def letter(type_num):
+    if type_num in TYPE_LETTER:
+        return TYPE_LETTER[type_num]
+    return None
+
+
+def cast(type_from, type_to):
+    return letter(type_from) + '2' + letter(type_to)
+
+
 class Visitor(LanguageVisitor):
-
-    # Type constants
-    BOOL = 0
-    INT = 1
-    STRING = 2
-    UNION = 3
-    VOID = 4
-    STRING_ARR = 5
-    FLOAT = 7
-    DOUBLE = 8
-    LONG = 6
-    PRIMITIVE = (0, 1)
-    LONG_TYPES = (6, 7)
-    OP_NAME = {'==': 'eq', '!=': 'ne', '>': 'gt', '<': 'lt', '>=': 'ge', '<=': 'le'}
-
-    class Method:
-        def __init__(self, return_type=-1, arguments=[], code=[], locals=[], stack_limit=0):
-            self.return_type = return_type
-            self.arguments = arguments
-            self.code = code
-            self.locals = locals
-            self.stack_limit = stack_limit
-
-    class Argument:
-        def __init__(self, arg_type=-1, name=None):
-            self.type = arg_type
-            self.name = name
-
-        def __eq__(self, other):
-            return self.type == other.type
-          
-    class Variable:
-        def __init__(self, var_type=-1, name=None, local_number=0):
-            self.type = var_type
-            self.name = name
-            self.local_number = local_number
-
-                            
+              
     def __init__(self, classname):
-        self.label_num = 0
+        self.label_num = -1
         self.local_variable_num = -1
         self.current_method = 'main'
-        self.methods = {'main': Visitor.Method(return_type=Visitor.VOID,
-                                               arguments=[Visitor.Argument(arg_type=Visitor.STRING_ARR, name = 'args')],
-                                               code =[],
-                                               locals=[self.STRING])}
+        self.methods = {'main': Method(return_type=VOID,
+                                       arguments=[Argument(arg_type=STRING_ARR, name = 'args')],
+                                       code =[],
+                                       locals=[STRING])}
         self.fields = {}  # fields are stored as name: type
         self.visible_vars = [{}] # maps name: number
         self.classname = classname
@@ -58,45 +124,6 @@ class Visitor(LanguageVisitor):
     def getNextLabelNum(self):
         self.label_num += 1
         return str(self.label_num)
-
-    def typeLen(self, var_type):
-        if var_type in (self.BOOL, self.INT, self.STRING, self.FLOAT):
-            return 1
-        elif var_type in (self.LONG, self.DOUBLE):
-            return 2
-        else:
-            print("Unknown type number " + str(var_type))
-            exit(0)
-
-    def typeToString(self, int_type):
-        return 'V' if int_type == self.VOID \
-                else 'Z' if int_type == self.BOOL \
-                else 'I' if int_type == self.INT  \
-                else 'J' if int_type == self.LONG \
-                else 'F' if int_type == self.FLOAT \
-                else 'D' if int_type == self.DOUBLE \
-                else 'Ljava/lang/String;' if int_type == self.STRING  \
-                else '[Ljava/lang/String;' if int_type == self.STRING_ARR  \
-                else None
-
-    def typeFromParser(self, parser_type):
-        return self.BOOL if parser_type == LanguageParser.BoolType \
-            else self.INT if parser_type == LanguageParser.IntType \
-            else self.STRING if parser_type == LanguageParser.StringType \
-            else self.VOID if parser_type == LanguageParser.VoidType \
-            else self.DOUBLE if parser_type == LanguageParser.DoubleType \
-            else self.FLOAT if parser_type == LanguageParser.FloatType \
-            else self.LONG if parser_type == LanguageParser.LongType \
-            else None
-
-    def constTypeFromParser(self, parser_type):
-        return self.BOOL if parser_type == LanguageParser.Bool \
-            else self.INT if parser_type == LanguageParser.Integer \
-            else self.STRING if parser_type == LanguageParser.String \
-            else self.DOUBLE if parser_type == LanguageParser.Double \
-            else self.FLOAT if parser_type == LanguageParser.Float \
-            else self.LONG if parser_type == LanguageParser.Long \
-            else None
 
     def isVisible(self, var_name):
         for vis in self.visible_vars:
@@ -110,21 +137,13 @@ class Visitor(LanguageVisitor):
                 return vis[var_name]
         return None
 
-    def checkArguments(self, arguments1, arguments2):
-        if len(arguments1) != len(arguments2):
-            return False
-        for i in range(len(arguments1)):
-            if arguments1[i] != arguments2[i]:
-                return False
-        return True
-
     def setMethodParams(self, arguments):
         local_vars = []
         visible = {}
         for arg in arguments:
             visible[arg.name] = len(local_vars)
             local_vars.append(arg.type)
-            if arg.type in self.LONG_TYPES:
+            if arg.type in LONG_TYPES:
                 local_vars.append(arg.type)
         self.visible_vars.append(visible)
         self.methods[self.current_method].locals = local_vars
@@ -138,14 +157,14 @@ class Visitor(LanguageVisitor):
         code.append(".super java/lang/Object")
         code.append("")
         for field in self.fields:
-            code.append(".field public static " + field + ' ' + self.typeToString(self.fields[field]))
+            code.append(".field public static " + field + ' ' + typeToString(self.fields[field]))
         code.append("")
         for method in self.methods:
             method_params = self.methods[method]
-            method_type = self.typeToString(method_params.return_type)
+            method_type = typeToString(method_params.return_type)
             args = ""
             for arg in method_params.arguments:
-                args += self.typeToString(arg.type)
+                args += typeToString(arg.type)
             code.append(".method public static " + method + " : (" + args + ")" + method_type)
             code.append(".limit stack " + str(method_params.stack_limit))
             code.append(".limit locals " + str(len(method_params.locals) + len(method_params.arguments)))
@@ -176,7 +195,7 @@ class Visitor(LanguageVisitor):
             self.visitVarDeclaration(child)
         elif rule_index == LanguageParser.RULE_funcCall:
             return_type, code, stack_limit = self.visitFuncCall(child)
-            if return_type != self.VOID:
+            if return_type != VOID:
                 code.append("pop")
             self.methods[self.current_method].code += code
             self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
@@ -204,7 +223,7 @@ class Visitor(LanguageVisitor):
         if self.isVisible(var_name):
             var_number = self.getVarNumber(var_name)
             var_type = self.methods[self.current_method].locals[var_number]
-            if var_type == self.UNION:
+            if var_type == UNION:
                 if var_field is None:
                     print("You should specify the field of union " + var_name)
                     exit(0)
@@ -218,14 +237,14 @@ class Visitor(LanguageVisitor):
                     print("Only unions can have fields, not variable " + var_name)
 
             # TODO: this check will be more comlicated after introduing doubles and longs
-            if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                print("Can't assign " + self.typeToString(expr_type) + " to the " +
-                      self.typeToString(var_type) + " variable " + var_name)
+            if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                print("Can't assign " + typeToString(expr_type) + " to the " +
+                      typeToString(var_type) + " variable " + var_name)
             # TODO: this also will be more complicated
-            if var_type in Visitor.PRIMITIVE:
+            if var_type in PRIMITIVE:
                 expr_code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
                 expr_code.append("iload" + (' ' if var_number > 3 else '_') + str(var_number))
-            elif var_type == Visitor.STRING:
+            elif var_type == STRING:
                 expr_code.append("astore" + (' ' if var_number > 3 else '_') + str(var_number))
                 expr_code.append("aload" + (' ' if var_number > 3 else '_') + str(var_number))
             return expr_type, expr_code, stack_limit
@@ -235,11 +254,11 @@ class Visitor(LanguageVisitor):
                 exit(0)
             var_type = self.fields[var_name]
             # TODO: And so will it
-            if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                print("Can't assign " + self.typeToString(expr_type) + " to the " +
-                      self.typeToString(var_type) + " variable " + var_name)
-            expr_code.append("putstatic " + self.classname + '/' + var_name + ' ' + self.typeToString(var_type))
-            expr_code.append("getstatic " + self.classname + '/' + var_name + ' ' + self.typeToString(var_type))
+            if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                print("Can't assign " + typeToString(expr_type) + " to the " +
+                      typeToString(var_type) + " variable " + var_name)
+            expr_code.append("putstatic " + self.classname + '/' + var_name + ' ' + typeToString(var_type))
+            expr_code.append("getstatic " + self.classname + '/' + var_name + ' ' + typeToString(var_type))
             return expr_type, expr_code, stack_limit
         else:
             print("No such visible variable: " + var_name)
@@ -249,8 +268,8 @@ class Visitor(LanguageVisitor):
     # If it's in the main method -- it's new field
     # Else it's local variable
     def visitVarDeclaration(self, ctx: LanguageParser.VarDeclarationContext):
-        var_type = self.typeFromParser(ctx.getChild(0).getChild(0).getSymbol().type)
-        if var_type is None or var_type == self.VOID:
+        var_type = typeFromParser(ctx.getChild(0).getChild(0).getSymbol().type)
+        if var_type is None or var_type == VOID:
             print("Illegal variable type " + ctx.getChild(0).getText())
             exit(0)
         var_name = ctx.getChild(1).getText()
@@ -262,12 +281,12 @@ class Visitor(LanguageVisitor):
             self.fields[var_name] = var_type
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                    print("Can't assign " + self.typeToString(expr_type) + " to the " +
-                          self.typeToString(var_type) + " variable " + var_name)
+                if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                    print("Can't assign " + typeToString(expr_type) + " to the " +
+                          typeToString(var_type) + " variable " + var_name)
                 self.methods[self.current_method].code += expr_code
                 self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
-                                                              ' ' + self.typeToString(var_type))
+                                                              ' ' + typeToString(var_type))
                 self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
         else:
             # add var
@@ -279,13 +298,13 @@ class Visitor(LanguageVisitor):
             self.visible_vars[-1][var_name] = var_number
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in self.PRIMITIVE or var_type not in self.PRIMITIVE):
-                    print("Can't assign " + self.typeToString(expr_type) + " to the " +
-                          self.typeToString(var_type) + " variable " + var_name)
+                if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                    print("Can't assign " + typeToString(expr_type) + " to the " +
+                          typeToString(var_type) + " variable " + var_name)
                 self.methods[self.current_method].code += expr_code
-                if var_type in Visitor.PRIMITIVE:
+                if var_type in PRIMITIVE:
                     self.methods[self.current_method].code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
-                elif var_type == Visitor.STRING:
+                elif var_type == STRING:
                     self.methods[self.current_method].code.append("astore" + (' ' if var_number > 3 else '_') + str(var_number))
                 self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit + 1)
 
@@ -299,7 +318,7 @@ class Visitor(LanguageVisitor):
 
         expr_type, code, stack_limit = self.visitAndExpr(first_child)
         if ctx.getChildCount() > 1:
-            if expr_type not in Visitor.PRIMITIVE or ctx.getChildCount() % 2 == 0:
+            if expr_type not in PRIMITIVE or ctx.getChildCount() % 2 == 0:
                 print("error")
                 exit(0)  # TODO handle error
 
@@ -309,7 +328,7 @@ class Visitor(LanguageVisitor):
                     exit(0)  # TODO handle error
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitAndExpr(ctx.getChild(2 * i + 2))
-                if next_expr_type not in Visitor.PRIMITIVE:
+                if next_expr_type not in PRIMITIVE:
                     print("error")
                     exit(0)  # TODO handle error
 
@@ -319,10 +338,9 @@ class Visitor(LanguageVisitor):
         return expr_type, code, stack_limit
 
     def visitAndExpr(self, ctx: LanguageParser.AndExprContext):
-        # TODO: check children
         expr_type, code, stack_limit = self.visitCompExpr(ctx.getChild(0))
         if ctx.getChildCount() > 1:
-            if expr_type not in Visitor.PRIMITIVE or ctx.getChildCount() % 2 == 0:
+            if expr_type not in PRIMITIVE or ctx.getChildCount() % 2 == 0:
                 print("error")
                 exit(0)  # TODO handle error
 
@@ -333,7 +351,7 @@ class Visitor(LanguageVisitor):
                     exit(0)  # TODO handle error
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitCompExpr(ctx.getChild(2 * i + 2))
-                if next_expr_type not in Visitor.PRIMITIVE:
+                if next_expr_type not in PRIMITIVE:
                     print("error")
                     exit(0)  # TODO handle error
 
@@ -343,63 +361,85 @@ class Visitor(LanguageVisitor):
         return expr_type, code, stack_limit
 
     def visitCompExpr(self, ctx: LanguageParser.CompExprContext):
-        # TODO: check children
-        expr_type, code, stack_limit = self.visitArithmExpr(ctx.getChild(0))
-        if ctx.getChildCount() > 1:
-            if expr_type not in Visitor.PRIMITIVE or ctx.getChildCount() % 2 == 0:
-                print("error")
-                exit(0)  # TODO handle error
+        neg = not hasattr(ctx.getChild(0), 'getRuleIndex') and ctx.getChild(0).getText() == '!'
+        expr_type, code, stack_limit = self.visitArithmExpr(ctx.getChild(neg))
+        if ctx.getChildCount() > (1 + neg):
+            if expr_type == STRING:
+                print("Please, don't ask me to compare strings, I can't do that:(")
+                exit(0)
 
             for i in range((ctx.getChildCount() - 1) // 2):
-                op = ctx.getChild(2 * i + 1).getText()
-                if op not in ('==', '!=', '>', '<', '>=', '<='):
-                    print("error")
-                    exit(0)  # TODO handle error
+                op = ctx.getChild(2 * i + 1 + neg).getText()
+                if op not in OP_NAME:
+                    print("Unknown operation")
+                    exit(0)
 
-                next_expr_type, next_expr_code, next_stack_limit = self.visitArithmExpr(ctx.getChild(2 * i + 2))
-                if next_expr_type not in Visitor.PRIMITIVE:
-                    print("error")
-                    exit(0)  # TODO handle error
+                next_expr_type, next_expr_code, next_stack_limit = self.visitArithmExpr(ctx.getChild(2 * i + 2 + neg))
 
+                if next_expr_type not in (BOOL, INT, LONG, DOUBLE, FLOAT):
+                    print("Wrong operand type for " + op + " operation")
+                    exit(0)
 
-                expr_type = Visitor.BOOL
+                common_type = operationResultType(expr_type, next_expr_type)
+                if common_type > expr_type and common_type != INT:
+                    code.append(cast(expr_type, common_type))
+                code += next_expr_code
+                if common_type > next_expr_type and common_type != INT:
+                    code.append(cast(next_expr_type, common_type))
+                    next_stack_limit = max(next_stack_limit, 2)
+
+                expr_type = BOOL
                 true_label = 'Label' + self.getNextLabelNum()
                 exit_label = 'Label' + self.getNextLabelNum()
-                code += next_expr_code + ['if_icmp' + Visitor.OP_NAME[op] + ' ' +true_label,
-                                          'iconst_0', 'goto ' + exit_label, true_label + ':',
-                                          'iconst_1', exit_label + ':']
-                stack_limit = max(stack_limit, next_stack_limit + 1)
+                if common_type in (LONG, DOUBLE, FLOAT):
+                    code.append(letter(common_type) + "cmp" + ('g' if common_type != LONG else ''))
+                    code += ['if' + OP_NAME[op] + ' ' + true_label,
+                             'iconst_0', 'goto ' + exit_label, true_label + ':',
+                             'iconst_1', exit_label + ':']
+                else:
+                    code += ['if_icmp' + OP_NAME[op] + ' ' + true_label,
+                             'iconst_0', 'goto ' + exit_label, true_label + ':',
+                             'iconst_1', exit_label + ':']
+                stack_limit = max(stack_limit, next_stack_limit + typeLen(common_type))
+
         return expr_type, code, stack_limit
 
     def visitArithmExpr(self, ctx: LanguageParser.ArithmExprContext):
-        # TODO: check children
         expr_type, code, stack_limit = self.visitSummand(ctx.getChild(0))
         if ctx.getChildCount() > 1:
-            if expr_type not in Visitor.PRIMITIVE or ctx.getChildCount() % 2 == 0:
-                print("error")
-                exit(0)  # TODO handle error
+            if expr_type == STRING:
+                print("Can't perfom operations with strings")
+                exit(0)
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 op = ctx.getChild(2 * i + 1).getText()
                 if op not in ('+', '-'):
-                    print("error")
-                    exit(0)  # TODO handle error
+                    print("Unknown operation: " + op)
+                    exit(0)
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitSummand(ctx.getChild(2 * i + 2))
-                if next_expr_type not in Visitor.PRIMITIVE:
-                    print("error")
-                    exit(0)  # TODO handle error
 
-                expr_type = Visitor.INT
-                code += next_expr_code + ['iadd' if op == '+' else 'isub']
-                stack_limit = max(stack_limit, next_stack_limit + 1)
+                if next_expr_type not in (BOOL, INT, LONG, DOUBLE, FLOAT):
+                    print("Wrong operand type for " + op + " operation")
+                    exit(0)
+
+                common_type = operationResultType(expr_type, next_expr_type)
+                if common_type > expr_type and common_type != INT:
+                    code.append(cast(expr_type, common_type))
+                code += next_expr_code
+                if common_type > next_expr_type and common_type != INT:
+                    code.append(cast(next_expr_type, common_type))
+                    next_stack_limit = max(next_stack_limit, 2)
+                code.append(letter(common_type) + ('add' if op == '+' else 'sub'))
+                stack_limit = max(stack_limit, next_stack_limit + typeLen(next_expr_type))
+                expr_type = common_type
         return expr_type, code, stack_limit
 
     def visitSummand(self, ctx: LanguageParser.SummandContext):
         expr_type, code, stack_limit = self.visitMul(ctx.getChild(0))
         if ctx.getChildCount() > 1:
-            if expr_type == self.STRING:
-                print("String multiplication is not defined")
+            if expr_type == STRING:
+                print("Can't perfom operations with strings")
                 exit(0)
 
             for i in range((ctx.getChildCount() - 1) // 2):
@@ -409,19 +449,26 @@ class Visitor(LanguageVisitor):
                     exit(0)
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitMul(ctx.getChild(2 * i + 2))
-                if next_expr_type not in Visitor.PRIMITIVE:
-                    print("error")
-                    exit(0)  # TODO handle error
+                if next_expr_type not in (BOOL, INT, LONG, DOUBLE, FLOAT):
+                    print("Wrong operand type for " + op + " operation")
+                    exit(0)
 
-                expr_type = Visitor.INT
+                common_type = operationResultType(expr_type, next_expr_type)
+                if common_type > expr_type and common_type != INT:
+                    code.append(cast(expr_type, common_type))
                 code += next_expr_code
+                if common_type > next_expr_type and common_type != INT:
+                    code\
+                        .append(cast(next_expr_type, common_type))
+                    next_stack_limit = max(next_stack_limit, 2)
                 if op == '*':
-                    code.append('imul')
+                    code.append(letter(common_type) + 'mul')
                 elif op == '/':
-                    code.append('idiv')
+                    code.append(letter(common_type) + 'div')
                 else:
-                    code.append('irem')
-                stack_limit = max(stack_limit, next_stack_limit + 1)
+                    code.append(letter(common_type) + 'rem')
+                stack_limit = max(stack_limit, next_stack_limit + typeLen(common_type))
+                expr_type = common_type
         return expr_type, code, stack_limit
 
     def visitMul(self, ctx: LanguageParser.MulContext):
@@ -438,16 +485,16 @@ class Visitor(LanguageVisitor):
                 print("Unknown parser node")
                 exit(0)
         else:
-            const_type = self.constTypeFromParser(child.getSymbol().type)
-            if const_type == self.BOOL:
+            const_type = constTypeFromParser(child.getSymbol().type)
+            if const_type == BOOL:
                 return const_type, ['iconst_0' if child.getText() == 'false' else 'iconst_1'], 1
-            elif const_type == self.INT:
+            elif const_type == INT:
                 return const_type, ['ldc ' + child.getText()], 1
-            elif const_type == self.LONG:
+            elif const_type == LONG:
                 return const_type, ['ldc2_w ' + child.getText()[1:] + 'l'], 2
-            elif const_type == self.FLOAT:
+            elif const_type == FLOAT:
                 return const_type, ['ldc ' + child.getText() + 'f'], 1
-            elif const_type == self.DOUBLE:
+            elif const_type == DOUBLE:
                 return const_type, ['ldc2_w ' + child.getText()[1:]], 2
 
 
@@ -460,7 +507,7 @@ class Visitor(LanguageVisitor):
         if self.isVisible(var_name):
             var_number = self.getVarNumber(var_name)
             var_type = self.methods[self.current_method].locals[var_number]
-            if var_type == self.UNION:
+            if var_type == UNION:
                 if var_field is None:
                     print("You can't access union " + var_name + " without specifying it's field")
                     exit(0)
@@ -470,17 +517,18 @@ class Visitor(LanguageVisitor):
                 else:
                     var_type = self.unions[var_name][var_field]
 
-            if var_type in self.PRIMITIVE:
+            if var_type in PRIMITIVE:
                 code = 'iload'
-            elif var_type == self.STRING:
+            elif var_type == STRING:
                 code = 'aload'
-            elif var_type == self.FLOAT:
+            elif var_type == FLOAT:
                 code = 'fload'
-            elif var_type == self.LONG:
+            elif var_type == LONG:
                 code = 'lload'
-            elif var_type == self.DOUBLE:
+            elif var_type == DOUBLE:
                 code = 'dload'
             else:
+                code = None
                 print("Wrong variable type")
                 exit(0)
             code += (' ' if var_number > 3 else '_') + str(var_number)
@@ -490,7 +538,7 @@ class Visitor(LanguageVisitor):
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
                 exit(0)
             var_type = self.fields[var_name]
-            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + self.typeToString(var_type)], self.typeLen(var_type)
+            return var_type, ['getstatic ' + self.classname + '/' + var_name + ' ' + typeToString(var_type)], typeLen(var_type)
         else:
             print("Variable " + var_name + " is not visible")
             exit(0)
@@ -504,19 +552,20 @@ class Visitor(LanguageVisitor):
         method = self.methods[func_name]
 
         if len(arg_types) != len(method.arguments):
-            print("Wrong number of argumentsfor " + func_name + ". " + str(len(arg_types)) +" instead of " + str(len(method.arguments)))
+            print("Wrong number of argumentsfor " + func_name + ". " + str(len(arg_types)) +
+                  " instead of " + str(len(method.arguments)))
             exit(0)
         for i in range(len(arg_types)):
             if arg_types[i] != method.arguments[i].type:
                 # hope that there are no functions with more than 20 arguments
                 print("Wrong " + str(i + 1) + ('st' if i == 0 else 'nd' if i == 1 else 'th') + " argument type for " + func_name + ".")
                 exit(0)
-        if method.return_type != self.VOID:
+        if method.return_type != VOID:
             stack_limit = max(stack_limit, 1)  # if there no arguments, but we need place to put return value
         code = []
         for arg_code in arg_codes:
             code += arg_code
-        code.append("invokestatic " + self.classname + '/' + func_name + '(' + "".join([self.typeToString(i) for i in arg_types]) + ')' + self.typeToString(method.return_type))
+        code.append("invokestatic " + self.classname + '/' + func_name + '(' + "".join([typeToString(i) for i in arg_types]) + ')' + typeToString(method.return_type))
         return method.return_type, code, stack_limit
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
@@ -530,7 +579,7 @@ class Visitor(LanguageVisitor):
         return types, expressions, stack_limit
 
     def visitVarType(self, ctx: LanguageParser.VarTypeContext):
-        return self.typeFromParser(ctx.getChild(0).getSymbol().type)
+        return typeFromParser(ctx.getChild(0).getSymbol().type)
 
 
 
@@ -561,7 +610,7 @@ class Visitor(LanguageVisitor):
         if func_name in self.methods:
             print("Function " + func_name + " is already defined")
         func_arguments = self.visitArguments(ctx.getChild(3))
-        self.methods[func_name] = self.Method(func_type, func_arguments, None)
+        self.methods[func_name] = Method(func_type, func_arguments, None)
 
     def visitFunctionDefinition(self, ctx: LanguageParser.FunctionDefinitionContext):
         func_type = self.visitFuncType(ctx.getChild(0))
@@ -570,15 +619,15 @@ class Visitor(LanguageVisitor):
             if self.methods[func_name].code is not None:
                 print("Function " + func_name + " is already defined")
         func_arguments = self.visitArguments(ctx.getChild(3))
-        if func_name in self.methods and not self.checkArguments(func_arguments, self.methods[func_name].arguments):
+        if func_name in self.methods and not checkArguments(func_arguments, self.methods[func_name].arguments):
             print("wrong arguments for " + func_name + " function definition")
             exit(0)
-        self.methods[func_name] = self.Method(func_type, func_arguments, [])
+        self.methods[func_name] = Method(func_type, func_arguments, [])
         self.current_method = func_name
         self.setMethodParams(func_arguments)
 
         self.visitBlock(ctx.getChild(5))
-        if func_type == self.VOID:
+        if func_type == VOID:
             self.methods[func_name].code.append("return")
 
         self.visible_vars.pop()
@@ -587,9 +636,9 @@ class Visitor(LanguageVisitor):
     def visitFuncType(self, ctx: LanguageParser.FuncTypeContext):
         child = ctx.getChild(0)
         if hasattr(child, "getRuleIndex"):
-            return self.typeFromParser(child.getChild(0).getSymbol().type)
+            return typeFromParser(child.getChild(0).getSymbol().type)
         elif child.getSymbol().type == LanguageParser.VoidType:
-            return self.VOID
+            return VOID
         else:
             print("illegal function type: " + child.getText())
             exit(0)
@@ -601,7 +650,7 @@ class Visitor(LanguageVisitor):
         return arguments
 
     def visitArgument(self, ctx: LanguageParser.ArgumentContext):
-        return self.Argument(self.visitVarType(ctx.getChild(0)), ctx.getChild(1).getText())
+        return Argument(self.visitVarType(ctx.getChild(0)), ctx.getChild(1).getText())
 
     def visitBlock(self, ctx: LanguageParser.BlockContext):
         self.visible_vars.append({})
@@ -611,7 +660,7 @@ class Visitor(LanguageVisitor):
 
     def visitWrite(self, ctx: LanguageParser.WriteContext):
         expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
-        expr_type = self.typeToString(expr_type)
+        expr_type = typeToString(expr_type)
         self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit + 1)
         return ['getstatic java/lang/System/out Ljava/io/PrintStream;'] + expr_code + \
                ['invokevirtual java/io/PrintStream/print(' + expr_type + ')V']
@@ -619,17 +668,17 @@ class Visitor(LanguageVisitor):
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
         ret_type = self.methods[self.current_method].return_type
         if ctx.getChildCount() == 1:
-            if self.methods[self.current_method].return_type != self.VOID:
+            if self.methods[self.current_method].return_type != VOID:
                 print("Function " + self.current_method + " can not return void value")
                 exit(0)
             self.methods[self.current_method].code.append("return")
         else:
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
-            if ret_type != expr_type and (ret_type not in self.PRIMITIVE or expr_type not in self.PRIMITIVE):
+            if ret_type != expr_type and (ret_type not in PRIMITIVE or expr_type not in PRIMITIVE):
                 print("Wrong return type for function " + self.current_method)
                 exit(0)
             self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
-            expr_code.append("ireturn" if ret_type in self.PRIMITIVE else "areturn" if ret_type == self.STRING else None)
+            expr_code.append("ireturn" if ret_type in PRIMITIVE else "areturn" if ret_type == STRING else None)
             self.methods[self.current_method].code += expr_code
 
 
@@ -657,16 +706,16 @@ class Visitor(LanguageVisitor):
             if field_name in fields:
                 print("Union " + name + " has more then one field " + field_name)
                 exit(0)
-            if field_type == self.VOID:
+            if field_type == VOID:
                 print("Union " + name + " contains void field")
                 exit(0)
-            if field_type not in self.PRIMITIVE and field_type != self.STRING:
+            if field_type not in PRIMITIVE and field_type != STRING:
                 union_size = 2
             fields[field_name] = field_type
         self.unions[name] = fields
         method_locals = self.methods[self.current_method].locals
         self.visible_vars[-1][name] = len(method_locals)
-        method_locals += [self.UNION] * union_size
+        method_locals += [UNION] * union_size
 
     def visitUnionField(self, ctx: LanguageParser.UnionFieldContext):
         return self.visitVarType(ctx.getChild(0)), ctx.getChild(1).getText()

@@ -93,16 +93,16 @@ assignment
     ;
 
 expression
-    : andExpr ('||' andExpr)*
+    : andExpr (('||'|'V') andExpr)*
     | assignment
     ;
 
 andExpr
-    : compExpr ('&&' compExpr)*
+    : compExpr (('&&'|'|') compExpr)*
     ;
 
 compExpr
-    : arithmExpr (CompOp arithmExpr)*
+    : '!'? arithmExpr (CompOp arithmExpr)*
     ;
 
 arithmExpr
