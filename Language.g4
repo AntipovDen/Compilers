@@ -78,7 +78,11 @@ varDeclaration
     ;
 
 unionDeclaration
-    : UnionType LowerName '{' (varType LowerName ('=' expression)? ';')+ '}'
+    : UnionType LowerName '{' unionField+ '}'
+    ;
+
+unionField
+    : varType LowerName ';'
     ;
 
 assignment

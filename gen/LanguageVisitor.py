@@ -1,4 +1,4 @@
-# Generated from /home/dantipov/PycharmProjects/Compilers/Language.g4 by ANTLR 4.5.1
+# Generated from /home/dantipov/PycharmProjects/compilers/Language.g4 by ANTLR 4.5.1
 from antlr4 import *
 if __name__ is not None and "." in __name__:
     from .LanguageParser import LanguageParser
@@ -71,6 +71,11 @@ class LanguageVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by LanguageParser#unionDeclaration.
     def visitUnionDeclaration(self, ctx:LanguageParser.UnionDeclarationContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by LanguageParser#unionField.
+    def visitUnionField(self, ctx:LanguageParser.UnionFieldContext):
         return self.visitChildren(ctx)
 
 

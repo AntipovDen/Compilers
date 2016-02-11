@@ -46,7 +46,7 @@ class Visitor(LanguageVisitor):
                                                code =[],
                                                locals=[self.STRING])}
         self.fields = {}  # fields are stored as name: type
-        self.visible_vars = [] # maps name: number
+        self.visible_vars = [{}] # maps name: number
         self.classname = classname
         self.unions = {} # name: fields, where fields is {field_name: field type}
         self.union_length = {}
@@ -75,6 +75,8 @@ class Visitor(LanguageVisitor):
             else self.STRING if parser_type == LanguageParser.StringType \
             else self.VOID if parser_type == LanguageParser.VoidType \
             else None
+
+
 
     def isVisible(self, var_name):
         for vis in self.visible_vars:
@@ -584,7 +586,29 @@ class Visitor(LanguageVisitor):
 
     def visitUnionDeclaration(self, ctx: LanguageParser.UnionDeclarationContext):
         name = ctx.getChild(1).getText()
-        #TODO: rebuild grammar so that children are just unionField nodes
+        if name in self.unions:
+            print("Union " + name + " hsa already been declared")
+            exit(0)
+        fields = {}
+        union_size = 1
+        for i in range(3, ctx.getChildCount() - 1):
+            field_type, field_name = self.visitUnionField(ctx.getChild(i))
+            if field_name in fields:
+                print("Union " + name + " has more then one field " + field_name)
+                exit(0)
+            if field_type == self.VOID:
+                print("Union " + name + " contains void field")
+                exit(0)
+            if field_type not in self.PRIMITIVE and field_type != self.STRING:
+                union_size = 2
+            fields[field_name] = field_type
+        self.unions[name] = fields
+        method_locals = self.methods[self.current_method].locals
+        self.visible_vars[-1][name] = len(method_locals)
+        method_locals += [self.UNION] * union_size
+
+    def visitUnionField(self, ctx: LanguageParser.UnionFieldContext):
+        return self.typeFromParser(ctx.getChild(0).getSymbol().type), ctx.getChild(1).getText()
 
     def visitCycle(self, ctx: LanguageParser.CycleContext):
         expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))  # TODO: check type
