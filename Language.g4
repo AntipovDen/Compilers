@@ -39,6 +39,9 @@ varType
     : IntType
     | BoolType
     | StringType
+    | LongType
+    | FloatType
+    | DoubleType
     ;
 
 arguments
@@ -114,6 +117,9 @@ mul
     : Bool
     | Integer
     | String
+    | Long
+    | Float
+    | Double
     | var
     | funcCall
     | '(' expression ')'
@@ -165,12 +171,18 @@ VoidType    : 'void' ;
 IntType     : 'int' ;
 BoolType    : 'bool' ;
 StringType  : 'str' ;
+LongType    : 'long' ;
+FloatType   : 'float' ;
+DoubleType  : 'double' ;
 UnionType   : 'union' ;
 Thread      : 'thread' ;
 
 Integer     : '0' | [-]?[1-9][0-9]*;
 String      : '"'(~('"'))*'"';
 Bool        : 'true' | 'false';
+Long        : 'l0' | 'l'[-]?[1-9][0-9]*;
+Float       : [-]?('0' | [1-9][0-9]*)'.'[0-9]+;
+Double      : 'd'[-]?('0' | [1-9][0-9]*)'.'[0-9]+;
 
 CompOp      : '==' | '!=' | '>' | '<' | '>=' | '<=';
 

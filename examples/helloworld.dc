@@ -1,11 +1,4 @@
-
-union a {
- int a;
- str b;
-};
-
-a.b = "helloworld";
-write a.b;
-
-a.a = 1;
-write a.a;
+int a = 10;
+long b = l100;
+float c = 1.2;
+double d = d1.20;
