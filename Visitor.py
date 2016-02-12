@@ -17,7 +17,7 @@ LONG_TYPES = (6, 7)
 OP_NAME = {'==': 'eq', '!=': 'ne', '>': 'gt', '<': 'lt', '>=': 'ge', '<=': 'le'}
 TYPE_DESCRIPTOR = {BOOL: 'Z', INT: 'I', STRING: 'Ljava/lang/string', STRING_ARR: '[Ljava/lang/string',
                    LONG: 'J', FLOAT: 'F', DOUBLE: 'D', VOID: 'V'}
-TYPE_LETTER = {BOOL: 'i', INT: 'i', LONG: 'l', FLOAT: 'f', DOUBLE: 'd'}
+TYPE_LETTER = {BOOL: 'i', INT: 'i', LONG: 'l', FLOAT: 'f', DOUBLE: 'd', STRING: 'a'}
 PARSER_TYPE = {LanguageParser.VoidType: VOID, LanguageParser.BoolType: BOOL, LanguageParser.IntType: INT,
                LanguageParser.LongType: LONG, LanguageParser.FloatType: FLOAT, LanguageParser.DoubleType: DOUBLE,
                LanguageParser.StringType: STRING}
@@ -124,6 +124,10 @@ class Visitor(LanguageVisitor):
     def getNextLabelNum(self):
         self.label_num += 1
         return str(self.label_num)
+
+    def intToBool(self):
+        exit_label = 'Label' + str(self.getNextLabelNum())
+        return ['ifeq ' + exit_label, 'iconst_1', exit_label + ':']
 
     def isVisible(self, var_name):
         for vis in self.visible_vars:
@@ -268,7 +272,7 @@ class Visitor(LanguageVisitor):
     # If it's in the main method -- it's new field
     # Else it's local variable
     def visitVarDeclaration(self, ctx: LanguageParser.VarDeclarationContext):
-        var_type = typeFromParser(ctx.getChild(0).getChild(0).getSymbol().type)
+        var_type = self.visitVar(ctx.getChild(0))
         if var_type is None or var_type == VOID:
             print("Illegal variable type " + ctx.getChild(0).getText())
             exit(0)
@@ -281,83 +285,124 @@ class Visitor(LanguageVisitor):
             self.fields[var_name] = var_type
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                if cast(expr_type, var_type) != var_type:
                     print("Can't assign " + typeToString(expr_type) + " to the " +
-                          typeToString(var_type) + " variable " + var_name)
-                self.methods[self.current_method].code += expr_code
-                self.methods[self.current_method].code.append("putstatic " + self.classname + '/' + var_name +
-                                                              ' ' + typeToString(var_type))
-                self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit)
+                          typeToString(var_type) + " variable " + var_name + ". Use explicit cast.")
+                method = self.methods[self.current_method]
+                method.code += expr_code
+                if expr_type < var_type:
+                    method.code.append(letter(expr_type) + '2' + letter(var_type))
+                method.code.append("putstatic " + self.classname + '/' + var_name +
+                                   ' ' + typeToString(var_type))
+                method.stack_limit = max(method.stack_limit, stack_limit, typeLen(var_type))
         else:
             # add var
             if self.isVisible(var_name):
                 print("local variable " + var_name + " has been defined twice")
                 exit(0)
-            var_number = len(self.methods[self.current_method].locals)
-            self.methods[self.current_method].locals.append(var_type)
+            method = self.methods[self.current_method]
+            var_number = len(method.locals)
+            method.locals += [var_type] * typeLen(var_type)
             self.visible_vars[-1][var_name] = var_number
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if expr_type != var_type and (expr_type not in PRIMITIVE or var_type not in PRIMITIVE):
+                if cast(expr_type, var_type) != var_type:
                     print("Can't assign " + typeToString(expr_type) + " to the " +
-                          typeToString(var_type) + " variable " + var_name)
-                self.methods[self.current_method].code += expr_code
-                if var_type in PRIMITIVE:
-                    self.methods[self.current_method].code.append("istore" + (' ' if var_number > 3 else '_') + str(var_number))
-                elif var_type == STRING:
-                    self.methods[self.current_method].code.append("astore" + (' ' if var_number > 3 else '_') + str(var_number))
-                self.methods[self.current_method].stack_limit = max(self.methods[self.current_method].stack_limit, stack_limit + 1)
-
+                          typeToString(var_type) + " variable " + var_name + ". Use explicit cast.")
+                method.code += expr_code
+                if expr_type < var_type:
+                    method.code.append(letter(expr_type) + '2' + letter(var_type))
+                method.code.append(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number))
+                method.stack_limit = max(method.stack_limit, stack_limit, typeLen(var_type))
 
     # everything about expressions
+    # TODO: optimize in such way that after first positive result we could jum to the next V operation
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
-        # TODO: check children
         first_child = ctx.getChild(0)
         if hasattr(first_child, 'getRuleIndex') and first_child.getRuleIndex() == LanguageParser.RULE_assignment:
             return self.visitAssignment(first_child)
 
         expr_type, code, stack_limit = self.visitAndExpr(first_child)
         if ctx.getChildCount() > 1:
-            if expr_type not in PRIMITIVE or ctx.getChildCount() % 2 == 0:
-                print("error")
-                exit(0)  # TODO handle error
+            if expr_type == STRING:
+                print("Please, don't ask me to or two strings, I can't do that")
+                exit(0)
 
             for i in range((ctx.getChildCount() - 1) // 2):
-                if ctx.getChild(2 * i + 1).getText() != '||':
-                    print("error")
-                    exit(0)  # TODO handle error
+                op = ctx.getChild(2 * i + 1).getText()
+                if op not in ('||', 'V'):
+                    print("Unknown operation: " + op)
+                    exit(0)
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitAndExpr(ctx.getChild(2 * i + 2))
-                if next_expr_type not in PRIMITIVE:
-                    print("error")
-                    exit(0)  # TODO handle error
 
-                expr_type = expr_type or next_expr_type
-                code += next_expr_code + ['ior']
-                stack_limit = max(stack_limit, next_stack_limit)
+                if next_expr_type not in (BOOL, INT, LONG, DOUBLE, FLOAT):
+                    print("Wrong operand type for " + op + " operation")
+                    exit(0)
+
+                if expr_type != BOOL:
+                    if expr_type == INT:
+                        code += self.intToBool()
+                    else:
+                        code += [letter(expr_type) + 'const_0',
+                                 letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
+                                 'dup', 'imul']
+                code += next_expr_code
+
+                if next_expr_type != BOOL:
+                    if next_expr_type == INT:
+                        code += self.intToBool()
+                    else:
+                        code += [letter(next_expr_type) + 'const_0',
+                                 letter(next_expr_type) + 'cmp' + ('g' if next_expr_type != LONG else ''),
+                                 'dup', 'imul']
+                code += ['isum', 'iconst_2', 'idiv']
+
+                stack_limit = max(stack_limit, next_stack_limit + typeLen(expr_type))
+                if op == 'V':
+                    code += ['ineg', 'iconst_1', 'iadd']
+                expr_type = BOOL
         return expr_type, code, stack_limit
 
     def visitAndExpr(self, ctx: LanguageParser.AndExprContext):
         expr_type, code, stack_limit = self.visitCompExpr(ctx.getChild(0))
         if ctx.getChildCount() > 1:
-            if expr_type not in PRIMITIVE or ctx.getChildCount() % 2 == 0:
-                print("error")
-                exit(0)  # TODO handle error
+            if expr_type == STRING:
+                print("Please, don't ask me to and two strings, I can't do that")
+                exit(0)
 
             for i in range((ctx.getChildCount() - 1) // 2):
-                # TODO check that child is '||'
-                if ctx.getChild(2 * i + 1).getText() != '&&':
-                    print("error")
-                    exit(0)  # TODO handle error
+                op = ctx.getChild(2 * i + 1).getText()
+                if op not in ('&&', '|'):
+                    print("Unknown operation " + op)
+                    exit(0)
 
                 next_expr_type, next_expr_code, next_stack_limit = self.visitCompExpr(ctx.getChild(2 * i + 2))
-                if next_expr_type not in PRIMITIVE:
-                    print("error")
-                    exit(0)  # TODO handle error
 
-                expr_type = expr_type or next_expr_type
-                code += next_expr_code + ['iand']
-                stack_limit = max(stack_limit, next_stack_limit + 1)
+                if next_expr_type not in (BOOL, INT, LONG, DOUBLE, FLOAT):
+                    print("Wrong operand type for " + op + " operation")
+                    exit(0)
+
+                common_type = operationResultType(expr_type, next_expr_type)
+                if common_type > expr_type and common_type != INT:
+                    code.append(cast(expr_type, common_type))
+                code += next_expr_code
+                if common_type > next_expr_type and common_type != INT:
+                    code.append(cast(next_expr_type, common_type))
+                    next_stack_limit = max(next_stack_limit, 2)
+
+                expr_type = BOOL
+                if common_type in PRIMITIVE:
+                    code.append('imul')
+                    if common_type == INT:
+                        code += self.intToBool()
+                else:
+                    code += [letter(common_type) + 'mul', letter(common_type) + 'const_0',
+                             letter(common_type) + 'cmp' + ('g' if common_type != LONG else ''), 'dup', 'imul']
+
+                stack_limit = max(stack_limit, next_stack_limit + len(common_type))
+                if op == '|':
+                    code += ['ineg', 'iconst_1', 'isum']
         return expr_type, code, stack_limit
 
     def visitCompExpr(self, ctx: LanguageParser.CompExprContext):
@@ -401,6 +446,21 @@ class Visitor(LanguageVisitor):
                              'iconst_0', 'goto ' + exit_label, true_label + ':',
                              'iconst_1', exit_label + ':']
                 stack_limit = max(stack_limit, next_stack_limit + typeLen(common_type))
+        if neg:
+            if expr_type == BOOL:
+                code += ['ineg', 'iconst_1', 'iadd']
+                stack_limit = max(stack_limit, 2)
+            elif expr_type == INT:
+                true_label = 'Label' + str(self.getNextLabelNum())
+                exit_label = 'Label' + str(self.getNextLabelNum())
+                code += ['ifeq ' + true_label, 'iconst_0', 'goto ' + exit_label,
+                         true_label + ':', 'iconst_1', exit_label + ':']
+                expr_type = BOOL
+            else:
+                code += [letter(expr_type) + 'const_0', letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
+                         'dup', 'imul', 'ineg', 'iconst_1', 'iadd']
+                stack_limit = max(stack_limit, 2 * typeLen(expr_type))
+                expr_type = BOOL
 
         return expr_type, code, stack_limit
 
