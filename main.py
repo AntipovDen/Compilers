@@ -19,6 +19,6 @@ v = Visitor("helloworld")
 # v = VisitorPrinter()
 v.visit(tree)
 with open("out/helloworld.j", 'w') as f:
-    for s in v.buildCode():
+    for s in v.build_code():
         f.write(s)
         f.write('\n')

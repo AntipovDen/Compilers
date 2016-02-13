@@ -110,7 +110,11 @@ arithmExpr
     ;
 
 summand
-    : mul (('*'|'/'|'%') mul)*
+    : (mul | castedMul) (('*'|'/'|'%') (mul | castedMul))*
+    ;
+
+castedMul
+    : '(' varType ')' mul
     ;
 
 mul

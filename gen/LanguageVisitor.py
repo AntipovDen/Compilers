@@ -109,6 +109,11 @@ class LanguageVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by LanguageParser#castedMul.
+    def visitCastedMul(self, ctx:LanguageParser.CastedMulContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by LanguageParser#mul.
     def visitMul(self, ctx:LanguageParser.MulContext):
         return self.visitChildren(ctx)

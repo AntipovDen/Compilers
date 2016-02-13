@@ -188,6 +188,15 @@ class LanguageListener(ParseTreeListener):
         pass
 
 
+    # Enter a parse tree produced by LanguageParser#castedMul.
+    def enterCastedMul(self, ctx:LanguageParser.CastedMulContext):
+        pass
+
+    # Exit a parse tree produced by LanguageParser#castedMul.
+    def exitCastedMul(self, ctx:LanguageParser.CastedMulContext):
+        pass
+
+
     # Enter a parse tree produced by LanguageParser#mul.
     def enterMul(self, ctx:LanguageParser.MulContext):
         pass
