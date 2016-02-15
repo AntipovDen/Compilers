@@ -159,7 +159,7 @@ read
     ;
 
 write
-    : 'write' expression
+    : ('write'|'writeln') expression
     ;
 
 returnValue

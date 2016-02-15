@@ -2,3 +2,35 @@ int a = 10;
 long b = l100;
 float c = 1.2;
 double d = d1.20;
+union u {
+    double d;
+    float f;
+};
+u.d = d2.71828;
+write u.d;
+
+int f(int a, long b, float c, double d);
+
+f(a, b, c, d);
+
+int f(int i, long l, float f, double d)
+{
+    write i;
+    write "\n";
+    write l;
+    write "\n";
+    write f;
+    write "\n";
+    write d;
+    write "\n";
+    write i != l;
+    write "\n";
+    write i != d;
+    write "\n";
+    write f == d;
+    write "\n";
+    write i + f;
+    write "\n";
+    write (float) d;
+    return true;
+}

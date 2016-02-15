@@ -13,9 +13,9 @@ LONG = 6
 FLOAT = 7
 DOUBLE = 8
 PRIMITIVE = (0, 1)
-LONG_TYPES = (6, 7)
+LONG_TYPES = (8, 6)
 OP_NAME = {'==': 'eq', '!=': 'ne', '>': 'gt', '<': 'lt', '>=': 'ge', '<=': 'le'}
-TYPE_DESCRIPTOR = {BOOL: 'Z', INT: 'I', STRING: 'Ljava/lang/string', STRING_ARR: '[Ljava/lang/string',
+TYPE_DESCRIPTOR = {BOOL: 'Z', INT: 'I', STRING: 'Ljava/lang/String;', STRING_ARR: '[Ljava/lang/String;',
                    LONG: 'J', FLOAT: 'F', DOUBLE: 'D', VOID: 'V'}
 TYPE_LETTER = {BOOL: 'i', INT: 'i', LONG: 'l', FLOAT: 'f', DOUBLE: 'd', STRING: 'a'}
 PARSER_TYPE = {LanguageParser.VoidType: VOID, LanguageParser.BoolType: BOOL, LanguageParser.IntType: INT,
@@ -29,7 +29,7 @@ class Method:
     def __init__(self, return_type=-1, arguments=None, code=None, local_constants=None, stack_limit=0):
         self.return_type = return_type
         self.arguments = arguments if arguments is not None else []
-        self.code = code if code is not None else []
+        self.code = code
         self.locals = local_constants if local_constants is not None else []
         self.stack_limit = stack_limit
 
@@ -250,7 +250,7 @@ class Visitor(LanguageVisitor):
                 expr_code.append(cast(expr_type, var_type))
             expr_code.append(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number))
             expr_code.append(letter(var_type) + "load" + (' ' if var_number > 3 else '_') + str(var_number))
-
+            return expr_type, expr_code, stack_limit
         elif var_name in self.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
@@ -275,7 +275,7 @@ class Visitor(LanguageVisitor):
     # If it's in the main method -- it's new field
     # Else it's local variable
     def visitVarDeclaration(self, ctx: LanguageParser.VarDeclarationContext):
-        var_type = self.visitVar(ctx.getChild(0))
+        var_type = self.visitVarType(ctx.getChild(0))
         if var_type is None or var_type == VOID:
             print("Illegal variable type " + ctx.getChild(0).getText())
             exit(0)
@@ -288,7 +288,7 @@ class Visitor(LanguageVisitor):
             self.fields[var_name] = var_type
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if cast(expr_type, var_type) != var_type:
+                if common_cast_type(expr_type, var_type) != var_type:
                     print("Can't assign " + type_to_string(expr_type) + " to the " +
                           type_to_string(var_type) + " variable " + var_name + ". Use explicit cast.")
                 method = self.methods[self.current_method]
@@ -309,7 +309,7 @@ class Visitor(LanguageVisitor):
             self.visible_vars[-1][var_name] = var_number
             if ctx.getChildCount() > 2:
                 expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(3))
-                if cast(expr_type, var_type) != var_type:
+                if common_cast_type(expr_type, var_type) != var_type:
                     print("Can't assign " + type_to_string(expr_type) + " to the " +
                           type_to_string(var_type) + " variable " + var_name + ". Use explicit cast.")
                 method.code += expr_code
@@ -499,7 +499,7 @@ class Visitor(LanguageVisitor):
         return expr_type, code, stack_limit
 
     def visitSummand(self, ctx: LanguageParser.SummandContext):
-        expr_type, code, stack_limit = self.visitMul(ctx.getChild(0))
+        expr_type, code, stack_limit = ctx.getChild(0).accept(self)
         if ctx.getChildCount() > 1:
             if expr_type == STRING:
                 print("Can't perfom operations with strings")
@@ -551,7 +551,7 @@ class Visitor(LanguageVisitor):
             const_type = const_type_from_parser(child.getSymbol().type)
             if const_type == BOOL:
                 return const_type, ['iconst_0' if child.getText() == 'false' else 'iconst_1'], 1
-            elif const_type == INT:
+            elif const_type in (INT, STRING):
                 return const_type, ['ldc ' + child.getText()], 1
             elif const_type == LONG:
                 return const_type, ['ldc2_w ' + child.getText()[1:] + 'l'], 2
@@ -559,6 +559,9 @@ class Visitor(LanguageVisitor):
                 return const_type, ['ldc ' + child.getText() + 'f'], 1
             elif const_type == DOUBLE:
                 return const_type, ['ldc2_w ' + child.getText()[1:]], 2
+            else:
+                print('Unknown constant type: ' + const_type)
+                exit(0)
 
     def visitCastedMul(self, ctx: LanguageParser.CastedMulContext):
         cast_type = self.visitVarType(ctx.getChild(1))
@@ -573,9 +576,9 @@ class Visitor(LanguageVisitor):
             if cast_type == BOOL and expr_type == INT:
                 expr_code += self.int_to_bool()
             else:
-                expr_code += cast(expr_type, cast_type)
+                expr_code.append(cast(expr_type, cast_type))
                 stack_limit = max(stack_limit, type_len(cast_type))
-        return expr_type, expr_code, stack_limit
+        return cast_type, expr_code, stack_limit
 
     def visitVar(self, ctx: LanguageParser.VarContext):
         var_name = ctx.getChild(0).getText()
@@ -596,9 +599,8 @@ class Visitor(LanguageVisitor):
                 else:
                     var_type = self.unions[var_name][var_field]
 
-            code = letter(var_type)
-            code += (' ' if var_number > 3 else '_') + str(var_number)
-            return var_type, [code], len(var_type)
+            code = letter(var_type) + 'load' + (' ' if var_number > 3 else '_') + str(var_number)
+            return var_type, [code], type_len(var_type)
         elif var_name in self.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
@@ -648,9 +650,9 @@ class Visitor(LanguageVisitor):
         stack_limit = 0
         for i in range((ctx.getChildCount() + 1) // 2):
             expr_type, expr_code, expr_stack_limit = self.visitExpression(ctx.getChild(2 * i))
+            stack_limit = max(stack_limit, expr_stack_limit + sum([type_len(t) for t in types]))
             types.append(expr_type)
             expressions.append(expr_code)
-            stack_limit = max(stack_limit, expr_stack_limit + i)
         return types, expressions, stack_limit
 
     def visitVarType(self, ctx: LanguageParser.VarTypeContext):
@@ -687,7 +689,7 @@ class Visitor(LanguageVisitor):
         if func_name in self.methods:
             print("Function " + func_name + " is already defined")
         func_arguments = self.visitArguments(ctx.getChild(3))
-        self.methods[func_name] = Method(func_type, func_arguments, None)
+        self.methods[func_name] = Method(func_type, func_arguments)
 
     def visitFunctionDefinition(self, ctx: LanguageParser.FunctionDefinitionContext):
         func_type = self.visitFuncType(ctx.getChild(0))
@@ -695,6 +697,8 @@ class Visitor(LanguageVisitor):
         if func_name in self.methods:
             if self.methods[func_name].code is not None:
                 print("Function " + func_name + " is already defined")
+                print(self.methods[func_name].code)
+                exit(0);
         func_arguments = self.visitArguments(ctx.getChild(3))
         if func_name in self.methods and not check_arguments(func_arguments, self.methods[func_name].arguments):
             print("wrong arguments for " + func_name + " function definition")

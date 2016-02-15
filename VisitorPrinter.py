@@ -9,6 +9,12 @@ class VisitorPrinter(LanguageVisitor):
     def visitTerminal(self, node):
         print('|   ' * self.tabs + node.getText())
 
+    def visitCastedMul(self, ctx: LanguageParser.CastedMulContext):
+        print('|   ' * self.tabs + "CastedMul")
+        self.tabs += 1
+        super().visitChildren(ctx)
+        self.tabs -= 1
+
     def visitCommand(self, ctx: LanguageParser.CommandContext):
         print('|   ' * self.tabs + "Command")
         self.tabs += 1
