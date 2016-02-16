@@ -173,6 +173,7 @@ class Visitor(LanguageVisitor):
                          'getstatic java/lang/System in Ljava/io/InputStream;',
                          'invokespecial java/util/Scanner/<init>(Ljava/io/InputStream;)V',
                          'putstatic ' + self.classname + ' Sc Ljava/util/Scanner;'] + main.code
+            main.stack_limit = max(main.stack_limit, 3)
 
         code.append("")
         for method in self.methods:
@@ -763,7 +764,8 @@ class Visitor(LanguageVisitor):
         method = self.current_method
         method.stack_limit = max(method.stack_limit, stack_limit + 1)
         return ['getstatic java/lang/System/out Ljava/io/PrintStream;'] + expr_code + \
-               ['invokevirtual java/io/PrintStream/print(' + expr_type + ')V']
+               ['invokevirtual java/io/PrintStream/print' + ('' if ctx.getChild(0).getText() == 'write' else 'ln') +
+                '(' + expr_type + ')V']
 
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
         method = self.current_method
@@ -840,13 +842,15 @@ class Visitor(LanguageVisitor):
         var_name = ctx.getChild(1).getText()
         self.current_method.code.append("getstatic helloworld Sc Ljava/util/Scanner;")
         if self.is_visible(var_name):
-            var_number = self.get_var_number(var_name)
-            var_type = self.current_method.locals[var_number]
+            var_num = self.get_var_number(var_name)
+            var_type = self.current_method.locals[var_num]
         elif var_name in self.fields:
             var_type = self.fields[var_name]
+            var_num = -1
         else:
             print("Variable " + var_name + " isn't visible")
             exit(0)
+            return
         if var_type == BOOL:
             self.current_method.code.append("invokevirtual java/util/Scanner/nextBoolean()Z")
         elif var_type == INT:
@@ -865,5 +869,6 @@ class Visitor(LanguageVisitor):
         if var_name in self.fields:
             self.current_method.code.append("putstatic " + self.classname + " " + var_name + " " + type_to_string(var_type))
         else:
-            self.current_method.code.append(letter(var_type) + "store" + ("_" if var_number < 4 else " ") + str(var_number))
+            self.current_method.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
+        self.current_method.stack_limit = max(self.current_method.stack_limit, type_len(var_type), type_len(var_type))
 
