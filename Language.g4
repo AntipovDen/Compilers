@@ -59,7 +59,11 @@ block
     ;
 
 thread
-    : Thread UpperName '(' arguments ')' block
+    : Thread UpperName '{' threadProgram '}'
+    ;
+
+threadProgram
+    : (function | command | comment)*
     ;
 
 command
@@ -74,6 +78,8 @@ command
     | funcCall ';'
     | treadCall ';'
     | block
+    | getLock ';'
+    | releaseLock ';'
     ;
 
 varDeclaration
@@ -143,7 +149,7 @@ callArguments
     ;
 
 treadCall
-    : UpperName '(' callArguments ')'
+    : UpperName '(' ')'
     ;
 
 condition
@@ -164,6 +170,14 @@ write
 
 returnValue
     : 'return' (expression)?
+    ;
+
+getLock
+    : 'lock' LowerName
+    ;
+
+releaseLock
+    : 'unlock' LowerName
     ;
 
 comment

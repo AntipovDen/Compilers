@@ -59,6 +59,11 @@ class LanguageVisitor(ParseTreeVisitor):
         return self.visitChildren(ctx)
 
 
+    # Visit a parse tree produced by LanguageParser#threadProgram.
+    def visitThreadProgram(self, ctx:LanguageParser.ThreadProgramContext):
+        return self.visitChildren(ctx)
+
+
     # Visit a parse tree produced by LanguageParser#command.
     def visitCommand(self, ctx:LanguageParser.CommandContext):
         return self.visitChildren(ctx)
@@ -161,6 +166,16 @@ class LanguageVisitor(ParseTreeVisitor):
 
     # Visit a parse tree produced by LanguageParser#returnValue.
     def visitReturnValue(self, ctx:LanguageParser.ReturnValueContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by LanguageParser#getLock.
+    def visitGetLock(self, ctx:LanguageParser.GetLockContext):
+        return self.visitChildren(ctx)
+
+
+    # Visit a parse tree produced by LanguageParser#releaseLock.
+    def visitReleaseLock(self, ctx:LanguageParser.ReleaseLockContext):
         return self.visitChildren(ctx)
 
 

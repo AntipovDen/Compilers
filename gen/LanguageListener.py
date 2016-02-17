@@ -98,6 +98,15 @@ class LanguageListener(ParseTreeListener):
         pass
 
 
+    # Enter a parse tree produced by LanguageParser#threadProgram.
+    def enterThreadProgram(self, ctx:LanguageParser.ThreadProgramContext):
+        pass
+
+    # Exit a parse tree produced by LanguageParser#threadProgram.
+    def exitThreadProgram(self, ctx:LanguageParser.ThreadProgramContext):
+        pass
+
+
     # Enter a parse tree produced by LanguageParser#command.
     def enterCommand(self, ctx:LanguageParser.CommandContext):
         pass
@@ -284,6 +293,24 @@ class LanguageListener(ParseTreeListener):
 
     # Exit a parse tree produced by LanguageParser#returnValue.
     def exitReturnValue(self, ctx:LanguageParser.ReturnValueContext):
+        pass
+
+
+    # Enter a parse tree produced by LanguageParser#getLock.
+    def enterGetLock(self, ctx:LanguageParser.GetLockContext):
+        pass
+
+    # Exit a parse tree produced by LanguageParser#getLock.
+    def exitGetLock(self, ctx:LanguageParser.GetLockContext):
+        pass
+
+
+    # Enter a parse tree produced by LanguageParser#releaseLock.
+    def enterReleaseLock(self, ctx:LanguageParser.ReleaseLockContext):
+        pass
+
+    # Exit a parse tree produced by LanguageParser#releaseLock.
+    def exitReleaseLock(self, ctx:LanguageParser.ReleaseLockContext):
         pass
 
 
