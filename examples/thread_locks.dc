@@ -2,17 +2,17 @@ str lock_string = "";
 long a = 0;
 
 thread T {
-    lock s;
+    lock lock_string;
     # now we are in the critical section
     # we can do anything we want with field "a" as long as we want
     # notice that we can brake the lock if we'll change lock_string in the block
     writeln "Thread lock";
-    while a < 10000
+    while a < 100000000
     {
         a = a + 1;
     }
     writeln "Thread unlock";
-    unlock s;
+    unlock lock_string;
     # we released the lock
     return;
 }
@@ -20,9 +20,9 @@ thread T {
 T();
 # let's wait for a while and try to get a lock of s
 int j = 0;
-while j < 100 { j = j + 1; }
-lock s;
+while j < 100000000 { j = j + 1; }
+lock lock_string;
 writeln "Main lock";
 a = -100000;
 writeln "Main unlcok";
-unlcok s;
+unlock lock_string;

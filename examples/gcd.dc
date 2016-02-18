@@ -1,6 +1,8 @@
 int a;
 int b;
+writeln "Enter the first number:";
 read a;
+writeln "Enter the second number:";
 read b;
 
 while a != b
@@ -15,4 +17,4 @@ while a != b
     }
 }
 
-write a;
+writeln a;

@@ -180,7 +180,7 @@ class Visitor(LanguageVisitor):
         code.append(".super java/lang/Object")
         code.append("")
         for field in self.fields:
-            code.append(".field public static " + field + ' ' + type_to_string(self.fields[field]))
+            code.append(".field public static volatile " + field + ' ' + type_to_string(self.fields[field]))
         if self.has_reader:
             code.append(".field public static Sc Ljava/util/Scanner;")
             main = self.methods['main']
@@ -1003,7 +1003,11 @@ class Visitor(LanguageVisitor):
     def visitReleaseLock(self, ctx: LanguageParser.ReleaseLockContext):
         var_name = ctx.getChild(1).getText()
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
-            print("Trying to get a lock of the shadowed variable")
+            print("Trying to release a lock of the shadowed variable")
+            exit(0)
+        if self.main_class is None and var_name not in self.fields or self.main_class is not None and var_name not in self.main_class.fields:
+            print("No such lockable variable: " + var_name)
+            exit(0)
         else:
             var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
             if var_type != STRING:
@@ -1011,14 +1015,16 @@ class Visitor(LanguageVisitor):
                 exit(0)
             classname = self.classname if self.main_class is None else self.main_class.classname
             self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         # 'dup',
-                                         # 'invokevirtual java/lang/Object/notifyAll()V',
                                          'monitorexit']
 
     def visitGetLock(self, ctx: LanguageParser.GetLockContext):
         var_name = ctx.getChild(1).getText()
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
-            print("Trying to release a lock of the shadowed variable")
+            print("Trying to get a lock of the shadowed variable")
+            exit(0)
+        if self.main_class is None and var_name not in self.fields or self.main_class is not None and var_name not in self.main_class.fields:
+            print("No such lockable variable: " + var_name)
+            exit(0)
         else:
             var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
             if var_type != STRING:
@@ -1026,6 +1032,4 @@ class Visitor(LanguageVisitor):
                 exit(0)
             classname = self.classname if self.main_class is None else self.main_class.classname
             self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         # 'dup',
                                          'monitorenter']
-                                         # 'invokevirtual java/lang/Object/wait()V']

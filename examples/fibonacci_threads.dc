@@ -2,11 +2,12 @@
 # also we don't care if we try to count Fibonacci number for non-positive numbers
 
 int res = -1;
+int n = 45;
 
 int fib(int n);
 
 
-thread T(int n)
+thread T
 {
     res = fib(n);
 }
@@ -20,6 +21,6 @@ int fib(int n)
     return fib(n - 1) + fib(n - 2);
 }
 
-T(45);
+T();
 while res == -1 {} #here we would see the pause before thread will print result into the res
 write res;

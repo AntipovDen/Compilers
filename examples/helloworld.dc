@@ -1,1 +1,1 @@
-writeln "helloworld";
+writeln "Hello, world!";

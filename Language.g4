@@ -59,7 +59,7 @@ block
     ;
 
 thread
-    : Thread UpperName '{' treadProgram '}'
+    : Thread UpperName '{' threadProgram '}'
     ;
 
 threadProgram
