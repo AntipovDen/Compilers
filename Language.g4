@@ -64,6 +64,7 @@ thread
 
 threadProgram
     : (function | thread | command | comment)*
+    ;
 
 command
     : varDeclaration ';'
