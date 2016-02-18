@@ -59,12 +59,11 @@ block
     ;
 
 thread
-    : Thread UpperName '{' threadProgram '}'
+    : Thread UpperName '{' treadProgram '}'
     ;
 
 threadProgram
-    : (function | command | comment)*
-    ;
+    : (function | thread | command | comment)*
 
 command
     : varDeclaration ';'
@@ -149,7 +148,7 @@ callArguments
     ;
 
 treadCall
-    : UpperName '(' ')'
+    : UpperName '(' callArguments ')'
     ;
 
 condition

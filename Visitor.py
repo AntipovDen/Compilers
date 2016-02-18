@@ -1001,7 +1001,7 @@ class Visitor(LanguageVisitor):
         self.current_method.stack_limit = max(self.current_method.stack_limit, type_len(var_type), type_len(var_type))
 
     def visitReleaseLock(self, ctx: LanguageParser.ReleaseLockContext):
-        var_name = ctx.getChild(1)
+        var_name = ctx.getChild(1).getText()
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to get a lock of the shadowed variable")
         else:
@@ -1011,10 +1011,12 @@ class Visitor(LanguageVisitor):
                 exit(0)
             classname = self.classname if self.main_class is None else self.main_class.classname
             self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         'monitorenter']
+                                         # 'dup',
+                                         # 'invokevirtual java/lang/Object/notifyAll()V',
+                                         'monitorexit']
 
     def visitGetLock(self, ctx: LanguageParser.GetLockContext):
-        var_name = ctx.getChild(1)
+        var_name = ctx.getChild(1).getText()
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to release a lock of the shadowed variable")
         else:
@@ -1024,4 +1026,6 @@ class Visitor(LanguageVisitor):
                 exit(0)
             classname = self.classname if self.main_class is None else self.main_class.classname
             self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         'monitorexit']
+                                         # 'dup',
+                                         'monitorenter']
+                                         # 'invokevirtual java/lang/Object/wait()V']
