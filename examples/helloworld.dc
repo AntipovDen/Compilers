@@ -1,4 +1,17 @@
-float a;
+thread T {
+    int a = 0;
+    while a < 100000000
+    {
+        a = a + 1;
+        int b = 0;
+        while b < 100
+        {
+            b = b + 1;
+        }
+    }
+    writeln "hello from thread";
+    return;
+}
 
-read a;
-writeln a;
+T();
+writeln "hello from main";

@@ -14,6 +14,7 @@ FLOAT = 7
 DOUBLE = 8
 PRIMITIVE = (0, 1)
 LONG_TYPES = (8, 6)
+THREAD = 9
 OP_NAME = {'==': 'eq', '!=': 'ne', '>': 'gt', '<': 'lt', '>=': 'ge', '<=': 'le'}
 TYPE_DESCRIPTOR = {BOOL: 'Z', INT: 'I', STRING: 'Ljava/lang/String;', STRING_ARR: '[Ljava/lang/String;',
                    LONG: 'J', FLOAT: 'F', DOUBLE: 'D', VOID: 'V'}
@@ -25,6 +26,7 @@ CONST_TYPE = {LanguageParser.String: STRING, LanguageParser.Bool: BOOL, Language
               LanguageParser.Long: LONG, LanguageParser.Float: FLOAT, LanguageParser.Double: DOUBLE}
 
 label_num = -1
+
 
 class Method:
     def __init__(self, return_type=-1, arguments=None, code=None, local_constants=None, stack_limit=0):
@@ -114,12 +116,17 @@ def get_next_label_num():
     return str(label_num)
 
 
+def int_to_bool():
+    exit_label = 'Label' + str(get_next_label_num())
+    return ['ifeq ' + exit_label, 'iconst_1', exit_label + ':']
+
+
 class Visitor(LanguageVisitor):
               
     def __init__(self, classname, main_class=None):
         self.label_num = -1
         self.local_variable_num = -1
-        # WARNING! it's mande in this way because of olnly threads are needed.
+        # WARNING! it's made in this way because of only threads are needed.
         # Actually it must be easy to make classes here
         self.current_method = Method(return_type=VOID,
                                      arguments=[Argument(arg_type=STRING_ARR, name='args')],
@@ -128,20 +135,16 @@ class Visitor(LanguageVisitor):
                               Method(return_type=VOID,
                                      arguments=[],
                                      code=[],
-                                     local_constants=[])
+                                     local_constants=[THREAD])
         self.methods = {'main' if main_class is None else 'run': self.current_method}
         self.fields = {}  # fields are stored as name: type
         self.visible_vars = [{}]  # maps name: number
-        self.classname = classname
+        self.classname = classname  # the name of the visitor's class
         self.unions = {}  # name: fields, where fields is {field_name: field type}
-        self.union_length = {}
-        self.has_reader = False
-        self.main_class = main_class
-        self.threads = {}
-
-    def int_to_bool(self):
-        exit_label = 'Label' + str(get_next_label_num())
-        return ['ifeq ' + exit_label, 'iconst_1', exit_label + ':']
+        self.union_length = {}  # name: length
+        self.has_reader = False  # if we need to keep scanner field in this class. Only possible for main class
+        self.main_class = main_class  # if we are in the main class or in the thread
+        self.threads = {}  # tread_name: thread code
 
     def is_visible(self, var_name):
         for vis in self.visible_vars:
@@ -156,7 +159,10 @@ class Visitor(LanguageVisitor):
         return None
 
     def set_method_params(self, arguments):
-        local_vars = []
+        if self.main_class is None:
+            local_vars = []
+        else:
+            local_vars = [THREAD]
         visible = {}
         for arg in arguments:
             visible[arg.name] = len(local_vars)
@@ -170,7 +176,6 @@ class Visitor(LanguageVisitor):
     def build_code(self):
         self.methods['main'].code.append("return")
         code = list()
-        # TODO threads
         code.append(".class " + self.classname)
         code.append(".super java/lang/Object")
         code.append("")
@@ -199,6 +204,44 @@ class Visitor(LanguageVisitor):
             code += method_params.code
             code.append(".end method")
             code.append("")
+        code.append(".end class")
+
+        code.append("")
+        for t in self.threads:
+            code += self.threads[t]
+            code.append("")
+        return code
+
+    def build_thread_code(self):
+        code = list()
+        code.append(".class " + self.classname)
+        code.append(".super java/lang/Object")
+        code.append(".implements java/lang/Runnable")
+        code.append("")
+        for field in self.fields:
+            code.append(".field public " + field + ' ' + type_to_string(self.fields[field]))
+        code.append("")
+        code.append(".method public <init> : ()V")
+        code.append(".limit stack 1")
+        code.append(".limit locals 1")
+        code.append("    aload_0")
+        code.append("    invokespecial java/lang/Object/<init>()V")
+        code.append("    return")
+        code.append(".end method")
+        code.append("")
+        for method in self.methods:
+            method_params = self.methods[method]
+            method_type = type_to_string(method_params.return_type)
+            args = ""
+            for arg in method_params.arguments:
+                args += type_to_string(arg.type)
+            code.append(".method public " + method + " : (" + args + ")" + method_type)
+            code.append(".limit stack " + str(method_params.stack_limit))
+            code.append(".limit locals " + str(len(method_params.locals) + len(method_params.arguments)))
+            code += method_params.code
+            code.append(".end method")
+            code.append("")
+        code.append(".end class")
         return code
 
     def visitProgram(self, ctx: LanguageParser.ProgramContext):
@@ -238,8 +281,12 @@ class Visitor(LanguageVisitor):
             self.visitUnionDeclaration(child)
         elif rule_index == LanguageParser.RULE_read:
             self.visitRead(child)
-        elif rule_index == LanguageParser.RULE_thread:
-            self.visitThread(child)
+        elif rule_index == LanguageParser.RULE_treadCall:
+            self.visitTreadCall(child)
+        elif rule_index == LanguageParser.RULE_getLock:
+            self.visitGetLock(child)
+        elif rule_index == LanguageParser.RULE_releaseLock:
+            self.visitReleaseLock(child)
         else:
             print("Wrong command")
             exit(0)
@@ -298,8 +345,14 @@ class Visitor(LanguageVisitor):
             if var_type != expr_type:
                 expr_code.append(cast(expr_type, var_type))
 
-            expr_code.append("putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
-            expr_code.append("getstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
+            if var_name in self.fields and self.main_class is not None:
+                expr_code = ["aload_0"] + expr_code
+                stack_limit += 1
+                expr_code.append("putfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
+                expr_code.append("getfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
+            else:
+                expr_code.append("putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
+                expr_code.append("getstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
             return expr_type, expr_code, stack_limit
         else:
             print("No such visible variable: " + var_name)
@@ -314,7 +367,8 @@ class Visitor(LanguageVisitor):
             print("Illegal variable type " + ctx.getChild(0).getText())
             exit(0)
         var_name = ctx.getChild(1).getText()
-        if self.current_method == 'main':
+        if self.main_class is None and self.current_method == self.methods['main'] or \
+           self.main_class is not None and self.current_method == self.methods['run']:
             # add field
             if var_name in self.fields:
                 print("global variable " + var_name + " has been defined twice")
@@ -326,11 +380,18 @@ class Visitor(LanguageVisitor):
                     print("Can't assign " + type_to_string(expr_type) + " to the " +
                           type_to_string(var_type) + " variable " + var_name + ". Use explicit cast.")
                 method = self.current_method
+                if self.main_class is not None:
+                    method.code.append("aload_0")
+                    stack_limit += 1
                 method.code += expr_code
                 if expr_type < var_type:
                     method.code.append(letter(expr_type) + '2' + letter(var_type))
-                method.code.append("putstatic " + self.classname + '/' + var_name +
-                                   ' ' + type_to_string(var_type))
+                if self.main_class is None:
+                    method.code.append("putstatic " + self.classname + '/' + var_name +
+                                       ' ' + type_to_string(var_type))
+                else:
+                    method.code.append("putfield " + self.classname + '/' + var_name +
+                                       ' ' + type_to_string(var_type))
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
         else:
             # add var
@@ -379,7 +440,7 @@ class Visitor(LanguageVisitor):
 
                 if expr_type != BOOL:
                     if expr_type == INT:
-                        code += self.int_to_bool()
+                        code += int_to_bool()
                     else:
                         code += [letter(expr_type) + 'const_0',
                                  letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
@@ -388,7 +449,7 @@ class Visitor(LanguageVisitor):
 
                 if next_expr_type != BOOL:
                     if next_expr_type == INT:
-                        code += self.int_to_bool()
+                        code += int_to_bool()
                     else:
                         code += [letter(next_expr_type) + 'const_0',
                                  letter(next_expr_type) + 'cmp' + ('g' if next_expr_type != LONG else ''),
@@ -432,7 +493,7 @@ class Visitor(LanguageVisitor):
                 if common_type in PRIMITIVE:
                     code.append('imul')
                     if common_type == INT:
-                        code += self.int_to_bool()
+                        code += int_to_bool()
                 else:
                     code += [letter(common_type) + 'mul', letter(common_type) + 'const_0',
                              letter(common_type) + 'cmp' + ('g' if common_type != LONG else ''), 'dup', 'imul']
@@ -608,7 +669,7 @@ class Visitor(LanguageVisitor):
                 print("Can't cast any type to string")
                 exit(0)
             if cast_type == BOOL and expr_type == INT:
-                expr_code += self.int_to_bool()
+                expr_code += int_to_bool()
             else:
                 expr_code.append(cast(expr_type, cast_type))
                 stack_limit = max(stack_limit, type_len(cast_type))
@@ -640,8 +701,12 @@ class Visitor(LanguageVisitor):
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
                 exit(0)
             var_type = self.fields[var_name]
-            return var_type, ['getstatic ' + self.classname + '/' + var_name + 
-                              ' ' + type_to_string(var_type)], type_len(var_type)
+            if self.main_class is None:
+                return var_type, ['getstatic ' + self.classname + '/' + var_name + 
+                                  ' ' + type_to_string(var_type)], type_len(var_type)
+            else:
+                return var_type, ['aload_0', 'getfield ' + self.classname + '/' + var_name + 
+                                  ' ' + type_to_string(var_type)], type_len(var_type)
         elif self.main_class is not None and var_name in self.main_class.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
@@ -686,11 +751,17 @@ class Visitor(LanguageVisitor):
                 exit(0)
         if method.return_type != VOID:
             stack_limit = max(stack_limit, 1)  # if there no arguments, but we need place to put return value
-        code = []
+        if self.main_class is not None and func_name in self.methods:
+            code = ['aload_0']
+            command = "invokevirtual "
+        else:
+            code = []
+            command = "invokestatic "
         for arg_code in arg_codes:
             code += arg_code
-        code.append("invokestatic " + classname + '/' + func_name + '(' +
-                    "".join([type_to_string(i) for i in arg_types]) + ')' + type_to_string(method.return_type))
+        
+        code.append(command + classname + '/' + func_name + '(' + "".join([type_to_string(i) for i in arg_types]) + 
+                    ')' + type_to_string(method.return_type))
         return method.return_type, code, stack_limit
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
@@ -738,10 +809,10 @@ class Visitor(LanguageVisitor):
                                      'dup',
                                      'new ' + main_class_name + '$' + thread_name,
                                      'dup',
-                                     'invokespecial ' + main_class_name + '$' + thread_name + 'java/lang/Thread/<init>()V',
+                                     'invokespecial ' + main_class_name + '$' + thread_name + '/<init>()V',
                                      'invokespecial java/lang/Thread/<init>(Ljava/lang/Runnable;)V',
-                                     'invokespecial java/lang/Tread/run/()V']
-
+                                     'invokevirtual java/lang/Thread/start()V']
+        self.current_method.stack_limit = max(self.current_method.stack_limit, 4)
 
     def visitFunctionDeclaration(self, ctx: LanguageParser.FunctionDeclarationContext):
         func_type = self.visitFuncType(ctx.getChild(0))
@@ -837,9 +908,9 @@ class Visitor(LanguageVisitor):
         if thread_name in self.threads:
             print("Thread " + thread_name + " is already exists")
             exit(0)
-        threadVisitor = Visitor(self.classname + '$' + thread_name, self)
-        threadVisitor.visitProgram(ctx.getChild(3))
-        self.threads[thread_name] = threadVisitor.build_code()
+        thread_visitor = Visitor(self.classname + '$' + thread_name, self)
+        thread_visitor.visitProgram(ctx.getChild(3))
+        self.threads[thread_name] = thread_visitor.build_thread_code()
 
     def visitUnionDeclaration(self, ctx: LanguageParser.UnionDeclarationContext):
         name = ctx.getChild(1).getText()
@@ -888,20 +959,23 @@ class Visitor(LanguageVisitor):
     def visitRead(self, ctx: LanguageParser.ReadContext):
         self.has_reader = True
         var_name = ctx.getChild(1).getText()
-        self.current_method.code.append("getstatic helloworld Sc Ljava/util/Scanner;")
+        classname = self.classname if self.main_class is None else self.main_class.classname
         if self.is_visible(var_name):
             var_num = self.get_var_number(var_name)
             var_type = self.current_method.locals[var_num]
         elif var_name in self.fields:
             var_type = self.fields[var_name]
             classname = self.classname
-        elif var_name in self.main_class.fields:
+            if self.main_class is not None:
+                self.current_method.code.append("aload_0")
+        elif self.main_class is not None and var_name in self.main_class.fields:
             var_type = self.main_class.fields[var_name]
             classname = self.main_class.classname
         else:
             print("Variable " + var_name + " isn't visible")
             exit(0)
             return
+        self.current_method.code.append("getstatic " + classname + " Sc Ljava/util/Scanner;")
         if var_type == BOOL:
             self.current_method.code.append("invokevirtual java/util/Scanner/nextBoolean()Z")
         elif var_type == INT:
@@ -919,6 +993,8 @@ class Visitor(LanguageVisitor):
             exit(0)
         if var_name not in self.fields and var_name not in self.main_class.fields:
             self.current_method.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
+        elif var_name in self.fields and self.main_class is not None:
+            self.current_method.code.append("putfield " + classname + " " + var_name + " " + type_to_string(var_type))
         else:
             self.current_method.code.append("putstatic " + classname + " " + var_name + " " + type_to_string(var_type))
 
@@ -929,15 +1005,23 @@ class Visitor(LanguageVisitor):
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to get a lock of the shadowed variable")
         else:
-            # push reference on the stack. i don't know how how to do it with non-object variables
-            # maybe i should only use strings for locks or do some investigation
-            self.current_method.code.append('monitorenter')
+            var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
+            if var_type != STRING:
+                print("Only locks on str objects are available")
+                exit(0)
+            classname = self.classname if self.main_class is None else self.main_class.classname
+            self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
+                                         'monitorenter']
 
     def visitGetLock(self, ctx: LanguageParser.GetLockContext):
         var_name = ctx.getChild(1)
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to release a lock of the shadowed variable")
         else:
-            #push reference on the stack. i don't know how how to do it with non-object variables
-            self.current_method.code.append('monitorexit')
-
+            var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
+            if var_type != STRING:
+                print("Only locks on str objects are available")
+                exit(0)
+            classname = self.classname if self.main_class is None else self.main_class.classname
+            self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
+                                         'monitorexit']
