@@ -118,7 +118,7 @@ def get_next_label_num():
 
 def int_to_bool():
     exit_label = 'Label' + str(get_next_label_num())
-    return ['ifeq ' + exit_label, 'iconst_1', exit_label + ':']
+    return ['dup', 'ifeq ' + exit_label, 'pop', 'iconst_1', exit_label + ':']
 
 
 class Visitor(LanguageVisitor):
@@ -414,7 +414,6 @@ class Visitor(LanguageVisitor):
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
 
     # everything about expressions
-    # TODO: optimize in such way that after first positive result we could jum to the next V operation
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
         first_child = ctx.getChild(0)
         if hasattr(first_child, 'getRuleIndex') and first_child.getRuleIndex() == LanguageParser.RULE_assignment:
@@ -426,7 +425,22 @@ class Visitor(LanguageVisitor):
                 print("Please, don't ask me to or two strings, I can't do that")
                 exit(0)
 
+            next_label = "Label" + str(get_next_label_num())
+
             for i in range((ctx.getChildCount() - 1) // 2):
+                if expr_type == INT:
+                    code += int_to_bool()
+                elif expr_type == FLOAT:
+                    code += ['fconst_0', 'fcmpg']
+                elif expr_type == DOUBLE:
+                    code += ['dconst_0', 'dcmpg']
+                elif expr_type == LONG:
+                    code += ['lconst_0', 'lcmp']
+                code.append("dup")
+                code.append("ifne " + next_label)
+                code.append("pop")
+                stack_limit = max(stack_limit, type_len(expr_type) * 2)
+
                 op = ctx.getChild(2 * i + 1).getText()
                 if op not in ('||', 'V'):
                     print("Unknown operation: " + op)
@@ -438,28 +452,23 @@ class Visitor(LanguageVisitor):
                     print("Wrong operand type for " + op + " operation")
                     exit(0)
 
-                if expr_type != BOOL:
-                    if expr_type == INT:
-                        code += int_to_bool()
-                    else:
-                        code += [letter(expr_type) + 'const_0',
-                                 letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
-                                 'dup', 'imul']
                 code += next_expr_code
 
-                if next_expr_type != BOOL:
+                stack_limit = max(stack_limit, next_stack_limit)
+                if op == 'V':
                     if next_expr_type == INT:
                         code += int_to_bool()
-                    else:
-                        code += [letter(next_expr_type) + 'const_0',
-                                 letter(next_expr_type) + 'cmp' + ('g' if next_expr_type != LONG else ''),
-                                 'dup', 'imul']
-                code += ['isum', 'iconst_2', 'idiv']
-
-                stack_limit = max(stack_limit, next_stack_limit + type_len(expr_type))
-                if op == 'V':
-                    code += ['ineg', 'iconst_1', 'iadd']
+                    elif next_expr_type == FLOAT:
+                        code += ['fconst_0', 'fcmpg', 'dup', 'imul']
+                    elif next_expr_type == DOUBLE:
+                        code += ['dconst_0', 'dcmpg', 'dup2', 'imul']
+                    elif next_expr_type == LONG:
+                        code += ['lconst_0', 'lcmp', 'dup2', 'imul']
+                    code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                    next_label = 'Label' + str(get_next_label_num())
+                    stack_limit = max(stack_limit, type_len(next_expr_type) * 2)
                 expr_type = BOOL
+            code.append(next_label + ':')
         return expr_type, code, stack_limit
 
     def visitAndExpr(self, ctx: LanguageParser.AndExprContext):
@@ -469,7 +478,22 @@ class Visitor(LanguageVisitor):
                 print("Please, don't ask me to and two strings, I can't do that")
                 exit(0)
 
+            next_label = 'Label' + str(get_next_label_num())
+
             for i in range((ctx.getChildCount() - 1) // 2):
+                if expr_type == INT:
+                    code += int_to_bool()
+                elif expr_type == FLOAT:
+                    code += ['fconst_0', 'fcmpg']
+                elif expr_type == DOUBLE:
+                    code += ['dconst_0', 'dcmpg']
+                elif expr_type == LONG:
+                    code += ['lconst_0', 'lcmp']
+                code.append("dup")
+                code.append("ifeq " + next_label)
+                code.append("pop")
+                stack_limit = max(stack_limit, type_len(expr_type) * 2)
+
                 op = ctx.getChild(2 * i + 1).getText()
                 if op not in ('&&', '|'):
                     print("Unknown operation " + op)
@@ -481,26 +505,23 @@ class Visitor(LanguageVisitor):
                     print("Wrong operand type for " + op + " operation")
                     exit(0)
 
-                common_type = common_cast_type(expr_type, next_expr_type)
-                if common_type > expr_type and common_type != INT:
-                    code.append(cast(expr_type, common_type))
                 code += next_expr_code
-                if common_type > next_expr_type and common_type != INT:
-                    code.append(cast(next_expr_type, common_type))
-                    next_stack_limit = max(next_stack_limit, 2)
 
-                expr_type = BOOL
-                if common_type in PRIMITIVE:
-                    code.append('imul')
-                    if common_type == INT:
-                        code += int_to_bool()
-                else:
-                    code += [letter(common_type) + 'mul', letter(common_type) + 'const_0',
-                             letter(common_type) + 'cmp' + ('g' if common_type != LONG else ''), 'dup', 'imul']
-
-                stack_limit = max(stack_limit, next_stack_limit + len(common_type))
+                stack_limit = max(stack_limit, next_stack_limit)
                 if op == '|':
-                    code += ['ineg', 'iconst_1', 'isum']
+                    if next_expr_type == INT:
+                        code += int_to_bool()
+                    elif next_expr_type == FLOAT:
+                        code += ['fconst_0', 'fcmpg', 'dup', 'imul']
+                    elif next_expr_type == DOUBLE:
+                        code += ['dconst_0', 'dcmpg', 'dup2', 'imul']
+                    elif next_expr_type == LONG:
+                        code += ['lconst_0', 'lcmp', 'dup2', 'imul']
+                    code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                    next_label = 'Label' + str(get_next_label_num())
+                    stack_limit = max(stack_limit, type_len(next_expr_type) * 2)
+                expr_type = BOOL
+            code.append(next_label + ':')
         return expr_type, code, stack_limit
 
     def visitCompExpr(self, ctx: LanguageParser.CompExprContext):
@@ -838,7 +859,6 @@ class Visitor(LanguageVisitor):
         self.methods[func_name] = self.current_method = Method(func_type, func_arguments, [])
         self.set_method_params(func_arguments)
 
-        # TODO: maybe i should check that method should return something?
         self.visitBlock(ctx.getChild(5))
         if func_type == VOID:
             self.current_method.code.append("return")
@@ -1005,7 +1025,8 @@ class Visitor(LanguageVisitor):
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to release a lock of the shadowed variable")
             exit(0)
-        if self.main_class is None and var_name not in self.fields or self.main_class is not None and var_name not in self.main_class.fields:
+        if self.main_class is None and var_name not in self.fields or self.main_class is not None \
+                and var_name not in self.main_class.fields:
             print("No such lockable variable: " + var_name)
             exit(0)
         else:
@@ -1022,7 +1043,8 @@ class Visitor(LanguageVisitor):
         if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
             print("Trying to get a lock of the shadowed variable")
             exit(0)
-        if self.main_class is None and var_name not in self.fields or self.main_class is not None and var_name not in self.main_class.fields:
+        if self.main_class is None and var_name not in self.fields or self.main_class is not None \
+                and var_name not in self.main_class.fields:
             print("No such lockable variable: " + var_name)
             exit(0)
         else:

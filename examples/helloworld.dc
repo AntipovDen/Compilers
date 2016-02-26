@@ -1,1 +1,1 @@
-writeln "Hello, world!";
+writeln 1 && 6/0 == 1;
