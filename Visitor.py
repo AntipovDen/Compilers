@@ -29,7 +29,7 @@ label_num = -1
 
 
 class Method:
-    def __init__(self, return_type=-1, arguments=None, code=None, local_constants=None, stack_limit=0):
+    def __init__(self, return_type=-1, arguments=None, code=CodeNode(), local_constants=None, stack_limit=0):
         self.return_type = return_type
         self.arguments = arguments if arguments is not None else []
         self.code = code
@@ -51,6 +51,18 @@ class Variable:
         self.type = var_type
         self.name = name
         self.local_number = local_number
+
+
+class CodeNode:
+    def __init__(self):
+        self.code = []
+        self.children = []
+
+    def build_code(self):
+        code = []
+        for c in self.children:
+            code += c.build_code()
+        return code + self.code
 
 
 def type_len(var_type):
@@ -201,7 +213,7 @@ class Visitor(LanguageVisitor):
             code.append(".method public static " + method + " : (" + args + ")" + method_type)
             code.append(".limit stack " + str(method_params.stack_limit))
             code.append(".limit locals " + str(len(method_params.locals) + len(method_params.arguments)))
-            code += method_params.code
+            code += method_params.code.build_code()
             code.append(".end method")
             code.append("")
         code.append(".end class")
@@ -324,8 +336,8 @@ class Visitor(LanguageVisitor):
 
             if var_type != expr_type:
                 expr_code.append(cast(expr_type, var_type))
+            expr_code.append("dup" + ("2" if var_type in LONG_TYPES else ""))
             expr_code.append(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number))
-            expr_code.append(letter(var_type) + "load" + (' ' if var_number > 3 else '_') + str(var_number))
             return expr_type, expr_code, stack_limit
         elif var_name in self.fields or self.main_class is not None and var_name in self.main_class.fields:
             if var_field is not None:
