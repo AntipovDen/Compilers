@@ -54,9 +54,12 @@ class Variable:
 
 
 class CodeNode:
-    def __init__(self):
-        self.code = []
-        self.children = []
+    def __init__(self, *args, **kwargs):
+        self.code = list(args)
+        if 'children' in kwargs:
+            self.children = kwargs['children']
+        else:
+            self.children = []
 
     def build_code(self):
         code = []
@@ -142,11 +145,11 @@ class Visitor(LanguageVisitor):
         # Actually it must be easy to make classes here
         self.current_method = Method(return_type=VOID,
                                      arguments=[Argument(arg_type=STRING_ARR, name='args')],
-                                     code=[],
+                                     code=CodeNode(),
                                      local_constants=[STRING]) if main_class is None else \
                               Method(return_type=VOID,
                                      arguments=[],
-                                     code=[],
+                                     code=CodeNode,
                                      local_constants=[THREAD])
         self.methods = {'main' if main_class is None else 'run': self.current_method}
         self.fields = {}  # fields are stored as name: type
@@ -250,7 +253,7 @@ class Visitor(LanguageVisitor):
             code.append(".method public " + method + " : (" + args + ")" + method_type)
             code.append(".limit stack " + str(method_params.stack_limit))
             code.append(".limit locals " + str(len(method_params.locals) + len(method_params.arguments)))
-            code += method_params.code
+            code += method_params.code.build_code()
             code.append(".end method")
             code.append("")
         code.append(".end class")
@@ -270,11 +273,13 @@ class Visitor(LanguageVisitor):
         rule_index = child.getRuleIndex()
         method = self.current_method
         if rule_index == LanguageParser.RULE_write:
-            method.code += self.visitWrite(child)
+            method.code.children.append(self.visitWrite(child))
         elif rule_index == LanguageParser.RULE_assignment:
-            _, code, stack_limit = self.visitAssignment(child)
-            method.code += code[:-1]
+            var_type, code, stack_limit = self.visitAssignment(child)
+            code.code.append("pop" + ("2" if var_type in LONG_TYPES else ""))
+            method.code.children.append(code)
             method.stack_limit = max(method.stack_limit, stack_limit)
+        # from here codeNodes are not implemented
         elif rule_index == LanguageParser.RULE_varDeclaration:
             self.visitVarDeclaration(child)
         elif rule_index == LanguageParser.RULE_funcCall:
@@ -334,11 +339,12 @@ class Visitor(LanguageVisitor):
                 print("Can't assign " + type_to_string(expr_type) + " to the " +
                       type_to_string(var_type) + " variable " + var_name)
 
+            code = CodeNode("dup" + ("2" if var_type in LONG_TYPES else ""),
+                            letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number),
+                            children=[expr_code])
             if var_type != expr_type:
-                expr_code.append(cast(expr_type, var_type))
-            expr_code.append("dup" + ("2" if var_type in LONG_TYPES else ""))
-            expr_code.append(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number))
-            return expr_type, expr_code, stack_limit
+                code.children.append(CodeNode(cast(expr_type, var_type)))
+            return expr_type, expr_code, max(stack_limit, 2 * type_len(var_type))
         elif var_name in self.fields or self.main_class is not None and var_name in self.main_class.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
@@ -354,17 +360,19 @@ class Visitor(LanguageVisitor):
                 print("Can't assign " + type_to_string(expr_type) + " to the " +
                       type_to_string(var_type) + " variable " + var_name)
 
-            if var_type != expr_type:
-                expr_code.append(cast(expr_type, var_type))
 
             if var_name in self.fields and self.main_class is not None:
-                expr_code = ["aload_0"] + expr_code
+                code = CodeNode("putfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                                "getfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                                children=[CodeNode("aload_0"), expr_code])
                 stack_limit += 1
-                expr_code.append("putfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
-                expr_code.append("getfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
             else:
-                expr_code.append("putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
-                expr_code.append("getstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type))
+                code = CodeNode("putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                                "getstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                                children=[expr_code])
+
+            if var_type != expr_type:
+                code.children.append(CodeNode(cast(expr_type, var_type)))
             return expr_type, expr_code, stack_limit
         else:
             print("No such visible variable: " + var_name)
@@ -437,20 +445,25 @@ class Visitor(LanguageVisitor):
                 print("Please, don't ask me to or two strings, I can't do that")
                 exit(0)
 
+            code = CodeNode(children=[code])
+
             next_label = "Label" + str(get_next_label_num())
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 if expr_type == INT:
-                    code += int_to_bool()
+                    jump_code = int_to_bool()
                 elif expr_type == FLOAT:
-                    code += ['fconst_0', 'fcmpg']
+                    jump_code = ['fconst_0', 'fcmpg']
                 elif expr_type == DOUBLE:
-                    code += ['dconst_0', 'dcmpg']
+                    jump_code = ['dconst_0', 'dcmpg']
                 elif expr_type == LONG:
-                    code += ['lconst_0', 'lcmp']
-                code.append("dup")
-                code.append("ifne " + next_label)
-                code.append("pop")
+                    jump_code = ['lconst_0', 'lcmp']
+                else:
+                    jump_code = []
+                jump_code.append("dup")
+                jump_code.append("ifne " + next_label)
+                jump_code.append("pop")
+                code.children.append(CodeNode(*jump_code))
                 stack_limit = max(stack_limit, type_len(expr_type) * 2)
 
                 op = ctx.getChild(2 * i + 1).getText()
@@ -464,23 +477,26 @@ class Visitor(LanguageVisitor):
                     print("Wrong operand type for " + op + " operation")
                     exit(0)
 
-                code += next_expr_code
+                code.children.append(next_expr_code)
 
                 stack_limit = max(stack_limit, next_stack_limit)
                 if op == 'V':
                     if next_expr_type == INT:
-                        code += int_to_bool()
+                        add_code = int_to_bool()
                     elif next_expr_type == FLOAT:
-                        code += ['fconst_0', 'fcmpg', 'dup', 'imul']
+                        add_code = ['fconst_0', 'fcmpg', 'dup', 'imul']
                     elif next_expr_type == DOUBLE:
-                        code += ['dconst_0', 'dcmpg', 'dup2', 'imul']
+                        add_code = ['dconst_0', 'dcmpg', 'dup2', 'imul']
                     elif next_expr_type == LONG:
-                        code += ['lconst_0', 'lcmp', 'dup2', 'imul']
-                    code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                        add_code = ['lconst_0', 'lcmp', 'dup2', 'imul']
+                    else:
+                        add_code = []
+                    add_code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                    code.children.append(CodeNode(*add_code))
                     next_label = 'Label' + str(get_next_label_num())
                     stack_limit = max(stack_limit, type_len(next_expr_type) * 2)
                 expr_type = BOOL
-            code.append(next_label + ':')
+            code.code = [next_label + ':']
         return expr_type, code, stack_limit
 
     def visitAndExpr(self, ctx: LanguageParser.AndExprContext):
@@ -491,19 +507,23 @@ class Visitor(LanguageVisitor):
                 exit(0)
 
             next_label = 'Label' + str(get_next_label_num())
+            code = CodeNode(children=[code])
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 if expr_type == INT:
-                    code += int_to_bool()
+                    jump_code = int_to_bool()
                 elif expr_type == FLOAT:
-                    code += ['fconst_0', 'fcmpg']
+                    jump_code = ['fconst_0', 'fcmpg']
                 elif expr_type == DOUBLE:
-                    code += ['dconst_0', 'dcmpg']
+                    jump_code = ['dconst_0', 'dcmpg']
                 elif expr_type == LONG:
-                    code += ['lconst_0', 'lcmp']
-                code.append("dup")
-                code.append("ifeq " + next_label)
-                code.append("pop")
+                    jump_code = ['lconst_0', 'lcmp']
+                else:
+                    jump_code = []
+                jump_code.append("dup")
+                jump_code.append("ifeq " + next_label)
+                jump_code.append("pop")
+                code.children.append(CodeNode(*jump_code))
                 stack_limit = max(stack_limit, type_len(expr_type) * 2)
 
                 op = ctx.getChild(2 * i + 1).getText()
@@ -517,23 +537,26 @@ class Visitor(LanguageVisitor):
                     print("Wrong operand type for " + op + " operation")
                     exit(0)
 
-                code += next_expr_code
+                code.children.append(next_expr_code)
 
                 stack_limit = max(stack_limit, next_stack_limit)
                 if op == '|':
                     if next_expr_type == INT:
-                        code += int_to_bool()
+                        add_code = int_to_bool()
                     elif next_expr_type == FLOAT:
-                        code += ['fconst_0', 'fcmpg', 'dup', 'imul']
+                        add_code = ['fconst_0', 'fcmpg', 'dup', 'imul']
                     elif next_expr_type == DOUBLE:
-                        code += ['dconst_0', 'dcmpg', 'dup2', 'imul']
+                        add_code = ['dconst_0', 'dcmpg', 'dup2', 'imul']
                     elif next_expr_type == LONG:
-                        code += ['lconst_0', 'lcmp', 'dup2', 'imul']
-                    code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                        add_code = ['lconst_0', 'lcmp', 'dup2', 'imul']
+                    else:
+                        add_code = []
+                    add_code += [next_label + ':', 'ineg', 'iconst_1', 'iadd']
+                    code.children.append(CodeNode(*add_code))
                     next_label = 'Label' + str(get_next_label_num())
                     stack_limit = max(stack_limit, type_len(next_expr_type) * 2)
                 expr_type = BOOL
-            code.append(next_label + ':')
+            code.code = [next_label + ':']
         return expr_type, code, stack_limit
 
     def visitCompExpr(self, ctx: LanguageParser.CompExprContext):
@@ -543,6 +566,8 @@ class Visitor(LanguageVisitor):
             if expr_type == STRING:
                 print("Please, don't ask me to compare strings, I can't do that:(")
                 exit(0)
+
+            code = CodeNode(children=[code])
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 op = ctx.getChild(2 * i + 1 + neg).getText()
@@ -558,38 +583,40 @@ class Visitor(LanguageVisitor):
 
                 common_type = common_cast_type(expr_type, next_expr_type)
                 if common_type > expr_type and common_type != INT:
-                    code.append(cast(expr_type, common_type))
-                code += next_expr_code
+                    code.children.append(CodeNode(cast(expr_type, common_type)))
+
+                code.children.append(next_expr_code)
                 if common_type > next_expr_type and common_type != INT:
-                    code.append(cast(next_expr_type, common_type))
+                    code.children.append(CodeNode(cast(next_expr_type, common_type)))
                     next_stack_limit = max(next_stack_limit, 2)
 
                 expr_type = BOOL
                 true_label = 'Label' + get_next_label_num()
                 exit_label = 'Label' + get_next_label_num()
                 if common_type in (LONG, DOUBLE, FLOAT):
-                    code.append(letter(common_type) + "cmp" + ('g' if common_type != LONG else ''))
-                    code += ['if' + OP_NAME[op] + ' ' + true_label,
-                             'iconst_0', 'goto ' + exit_label, true_label + ':',
-                             'iconst_1', exit_label + ':']
+                    code.children.append(CodeNode(letter(common_type) + "cmp" + ('g' if common_type != LONG else ''),
+                                                  'if' + OP_NAME[op] + ' ' + true_label,
+                                                  'iconst_0', 'goto ' + exit_label, true_label + ':',
+                                                  'iconst_1', exit_label + ':'))
                 else:
-                    code += ['if_icmp' + OP_NAME[op] + ' ' + true_label,
-                             'iconst_0', 'goto ' + exit_label, true_label + ':',
-                             'iconst_1', exit_label + ':']
+                    code.children.append(CodeNode('if_icmp' + OP_NAME[op] + ' ' + true_label,
+                                                  'iconst_0', 'goto ' + exit_label, true_label + ':',
+                                                  'iconst_1', exit_label + ':'))
                 stack_limit = max(stack_limit, next_stack_limit + type_len(common_type))
         if neg:
             if expr_type == BOOL:
-                code += ['ineg', 'iconst_1', 'iadd']
+                code = CodeNode('ineg', 'iconst_1', 'iadd', children = [code])
                 stack_limit = max(stack_limit, 2)
             elif expr_type == INT:
                 true_label = 'Label' + str(get_next_label_num())
                 exit_label = 'Label' + str(get_next_label_num())
-                code += ['ifeq ' + true_label, 'iconst_0', 'goto ' + exit_label,
-                         true_label + ':', 'iconst_1', exit_label + ':']
+                code = CodeNode('ifeq ' + true_label, 'iconst_0', 'goto ' + exit_label,
+                                true_label + ':', 'iconst_1', exit_label + ':', children=[code])
                 expr_type = BOOL
             else:
-                code += [letter(expr_type) + 'const_0', letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
-                         'dup', 'imul', 'ineg', 'iconst_1', 'iadd']
+                code = CodeNode(letter(expr_type) + 'const_0',
+                       letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
+                       'dup', 'imul', 'ineg', 'iconst_1', 'iadd', children=[code])
                 stack_limit = max(stack_limit, 2 * type_len(expr_type))
                 expr_type = BOOL
 
@@ -601,6 +628,7 @@ class Visitor(LanguageVisitor):
             if expr_type == STRING:
                 print("Can't perfom operations with strings")
                 exit(0)
+            code = CodeNode(children=[code])
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 op = ctx.getChild(2 * i + 1).getText()
@@ -616,12 +644,12 @@ class Visitor(LanguageVisitor):
 
                 common_type = common_cast_type(expr_type, next_expr_type)
                 if common_type > expr_type and common_type != INT:
-                    code.append(cast(expr_type, common_type))
-                code += next_expr_code
+                    code.children.append(CodeNode(cast(expr_type, common_type)))
+                code.children.append(next_expr_code)
                 if common_type > next_expr_type and common_type != INT:
-                    code.append(cast(next_expr_type, common_type))
+                    code.children.append(CodeNode(cast(next_expr_type, common_type)))
                     next_stack_limit = max(next_stack_limit, 2)
-                code.append(letter(common_type) + ('add' if op == '+' else 'sub'))
+                code.children.append(CodeNode(letter(common_type) + ('add' if op == '+' else 'sub')))
                 stack_limit = max(stack_limit, next_stack_limit + type_len(next_expr_type))
                 expr_type = common_type
         return expr_type, code, stack_limit
@@ -632,6 +660,7 @@ class Visitor(LanguageVisitor):
             if expr_type == STRING:
                 print("Can't perfom operations with strings")
                 exit(0)
+            code = CodeNode(children=[code])
 
             for i in range((ctx.getChildCount() - 1) // 2):
                 op = ctx.getChild(2 * i + 1).getText()
@@ -646,21 +675,38 @@ class Visitor(LanguageVisitor):
 
                 common_type = common_cast_type(expr_type, next_expr_type)
                 if common_type > expr_type and common_type != INT:
-                    code.append(cast(expr_type, common_type))
-                code += next_expr_code
+                    code.children.append(CodeNode(cast(expr_type, common_type)))
+                code.children.append(next_expr_code)
                 if common_type > next_expr_type and common_type != INT:
-                    code\
-                        .append(cast(next_expr_type, common_type))
+                    code.children.append(CodeNode(cast(next_expr_type, common_type)))
                     next_stack_limit = max(next_stack_limit, 2)
                 if op == '*':
-                    code.append(letter(common_type) + 'mul')
+                    code.children.append(CodeNode(letter(common_type) + 'mul'))
                 elif op == '/':
-                    code.append(letter(common_type) + 'div')
+                    code.children.append(CodeNode(letter(common_type) + 'div'))
                 else:
-                    code.append(letter(common_type) + 'rem')
+                    code.children.append(CodeNode(letter(common_type) + 'rem'))
                 stack_limit = max(stack_limit, next_stack_limit + type_len(common_type))
                 expr_type = common_type
         return expr_type, code, stack_limit
+
+    def visitCastedMul(self, ctx: LanguageParser.CastedMulContext):
+        cast_type = self.visitVarType(ctx.getChild(1))
+        expr_type, expr_code, stack_limit = self.visitMul(ctx.getChild(3))
+        if cast_type != expr_type:
+            if cast_type == STRING:
+                print("Can't cast to string other types than string")
+                exit(0)
+            if expr_type == STRING:
+                print("Can't cast any type to string")
+                exit(0)
+            if cast_type == BOOL and expr_type == INT:
+                code = CodeNode(*int_to_bool(), children=[expr_code])
+            else:
+                code = CodeNode(cast(expr_type, cast_type), children=[expr_code])
+                stack_limit = max(stack_limit, type_len(cast_type))
+            return cast_type, code, stack_limit
+        return cast_type, expr_code, stack_limit
 
     def visitMul(self, ctx: LanguageParser.MulContext):
         if ctx.getChildCount() == 3:
@@ -678,35 +724,18 @@ class Visitor(LanguageVisitor):
         else:
             const_type = const_type_from_parser(child.getSymbol().type)
             if const_type == BOOL:
-                return const_type, ['iconst_0' if child.getText() == 'false' else 'iconst_1'], 1
+                return const_type, CodeNode('iconst_0' if child.getText() == 'false' else 'iconst_1'), 1
             elif const_type in (INT, STRING):
-                return const_type, ['ldc ' + child.getText()], 1
+                return const_type, CodeNode('ldc ' + child.getText()), 1
             elif const_type == LONG:
-                return const_type, ['ldc2_w ' + child.getText()[1:] + 'l'], 2
+                return const_type, CodeNode('ldc2_w ' + child.getText()[1:] + 'l'), 2
             elif const_type == FLOAT:
-                return const_type, ['ldc ' + child.getText() + 'f'], 1
+                return const_type, CodeNode('ldc ' + child.getText() + 'f'), 1
             elif const_type == DOUBLE:
-                return const_type, ['ldc2_w ' + child.getText()[1:]], 2
+                return const_type, CodeNode('ldc2_w ' + child.getText()[1:]), 2
             else:
                 print('Unknown constant type: ' + str(const_type))
                 exit(0)
-
-    def visitCastedMul(self, ctx: LanguageParser.CastedMulContext):
-        cast_type = self.visitVarType(ctx.getChild(1))
-        expr_type, expr_code, stack_limit = self.visitMul(ctx.getChild(3))
-        if cast_type != expr_type:
-            if cast_type == STRING:
-                print("Can't cast to string other types than string")
-                exit(0)
-            if expr_type == STRING:
-                print("Can't cast any type to string")
-                exit(0)
-            if cast_type == BOOL and expr_type == INT:
-                expr_code += int_to_bool()
-            else:
-                expr_code.append(cast(expr_type, cast_type))
-                stack_limit = max(stack_limit, type_len(cast_type))
-        return cast_type, expr_code, stack_limit
 
     def visitVar(self, ctx: LanguageParser.VarContext):
         var_name = ctx.getChild(0).getText()
@@ -728,25 +757,25 @@ class Visitor(LanguageVisitor):
                     var_type = self.unions[var_name][var_field]
 
             code = letter(var_type) + 'load' + (' ' if var_number > 3 else '_') + str(var_number)
-            return var_type, [code], type_len(var_type)
+            return var_type, CodeNode(code), type_len(var_type)
         elif var_name in self.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
                 exit(0)
             var_type = self.fields[var_name]
             if self.main_class is None:
-                return var_type, ['getstatic ' + self.classname + '/' + var_name + 
-                                  ' ' + type_to_string(var_type)], type_len(var_type)
+                return var_type, CodeNode('getstatic ' + self.classname + '/' + var_name +
+                                          ' ' + type_to_string(var_type)), type_len(var_type)
             else:
-                return var_type, ['aload_0', 'getfield ' + self.classname + '/' + var_name + 
-                                  ' ' + type_to_string(var_type)], type_len(var_type)
+                return var_type, CodeNode('aload_0', 'getfield ' + self.classname + '/' + var_name +
+                                          ' ' + type_to_string(var_type)), type_len(var_type)
         elif self.main_class is not None and var_name in self.main_class.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
                 exit(0)
             var_type = self.main_class.fields[var_name]
-            return var_type, ['getstatic ' + self.main_class.classname + '/' + var_name +
-                              ' ' + type_to_string(var_type)], type_len(var_type)
+            return var_type, CodeNode('getstatic ' + self.main_class.classname + '/' + var_name +
+                                      ' ' + type_to_string(var_type)), type_len(var_type)
         else:
             print("Variable " + var_name + " is not visible")
             exit(0)
@@ -767,7 +796,7 @@ class Visitor(LanguageVisitor):
             classname = self.classname
 
         if len(arg_types) != len(method.arguments):
-            print("Wrong number of argumentsfor " + func_name + ". " + str(len(arg_types)) +
+            print("Wrong number of arguments for " + func_name + ". " + str(len(arg_types)) +
                   " instead of " + str(len(method.arguments)))
             exit(0)
         for i in range(len(arg_types)):
@@ -784,17 +813,16 @@ class Visitor(LanguageVisitor):
                 exit(0)
         if method.return_type != VOID:
             stack_limit = max(stack_limit, 1)  # if there no arguments, but we need place to put return value
+        code = CodeNode()
         if self.main_class is not None and func_name in self.methods:
-            code = ['aload_0']
+            code.children.append(CodeNode('aload_0'))
             command = "invokevirtual "
         else:
-            code = []
             command = "invokestatic "
-        for arg_code in arg_codes:
-            code += arg_code
+        code.children += arg_codes
         
-        code.append(command + classname + '/' + func_name + '(' + "".join([type_to_string(i) for i in arg_types]) + 
-                    ')' + type_to_string(method.return_type))
+        code.code = [command + classname + '/' + func_name + '(' + "".join([type_to_string(i) for i in arg_types]) +
+                     ')' + type_to_string(method.return_type)]
         return method.return_type, code, stack_limit
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
