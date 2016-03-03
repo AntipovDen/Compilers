@@ -149,7 +149,7 @@ class Visitor(LanguageVisitor):
                                      local_constants=[STRING]) if main_class is None else \
                               Method(return_type=VOID,
                                      arguments=[],
-                                     code=CodeNode,
+                                     code=CodeNode(),
                                      local_constants=[THREAD])
         self.methods = {'main' if main_class is None else 'run': self.current_method}
         self.fields = {}  # fields are stored as name: type
@@ -189,7 +189,7 @@ class Visitor(LanguageVisitor):
         self.current_method.stack_limit = 0
 
     def build_code(self):
-        self.methods['main'].code.append("return")
+        self.methods['main'].code.code.append("return")
         code = list()
         code.append(".class " + self.classname)
         code.append(".super java/lang/Object")
@@ -273,35 +273,45 @@ class Visitor(LanguageVisitor):
         rule_index = child.getRuleIndex()
         method = self.current_method
         if rule_index == LanguageParser.RULE_write:
-            method.code.children.append(self.visitWrite(child))
+            self.visitWrite(child)
+
         elif rule_index == LanguageParser.RULE_assignment:
-            var_type, code, stack_limit = self.visitAssignment(child)
-            code.code.append("pop" + ("2" if var_type in LONG_TYPES else ""))
+            _, code, stack_limit = self.visitAssignment(child)
+            code.code.pop(0)
             method.code.children.append(code)
             method.stack_limit = max(method.stack_limit, stack_limit)
-        # from here codeNodes are not implemented
+
         elif rule_index == LanguageParser.RULE_varDeclaration:
             self.visitVarDeclaration(child)
+
         elif rule_index == LanguageParser.RULE_funcCall:
             return_type, code, stack_limit = self.visitFuncCall(child)
             if return_type != VOID:
-                code.append("pop")
-            method.code += code
+                code.code.append("pop")
+            method.code.children.append(code)
             method.stack_limit = max(method.stack_limit, stack_limit)
+
         elif rule_index == LanguageParser.RULE_returnValue:
             self.visitReturnValue(child)
+
         elif rule_index == LanguageParser.RULE_condition:
             self.visitCondition(child)
+
         elif rule_index == LanguageParser.RULE_cycle:
             self.visitCycle(child)
+
         elif rule_index == LanguageParser.RULE_unionDeclaration:
             self.visitUnionDeclaration(child)
+
         elif rule_index == LanguageParser.RULE_read:
             self.visitRead(child)
+
         elif rule_index == LanguageParser.RULE_treadCall:
             self.visitTreadCall(child)
+
         elif rule_index == LanguageParser.RULE_getLock:
             self.visitGetLock(child)
+
         elif rule_index == LanguageParser.RULE_releaseLock:
             self.visitReleaseLock(child)
         else:
@@ -320,6 +330,7 @@ class Visitor(LanguageVisitor):
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(2))
 
         if self.is_visible(var_name):
+            # TODO: unnecessary  assignment
             var_number = self.get_var_number(var_name)
             var_type = self.current_method.locals[var_number]
             if var_type == UNION:
@@ -387,8 +398,9 @@ class Visitor(LanguageVisitor):
             print("Illegal variable type " + ctx.getChild(0).getText())
             exit(0)
         var_name = ctx.getChild(1).getText()
-        if self.main_class is None and self.current_method == self.methods['main'] or \
-           self.main_class is not None and self.current_method == self.methods['run']:
+        method = self.current_method
+        if self.main_class is None and method == self.methods['main'] or \
+           self.main_class is not None and method == self.methods['run']:
             # add field
             if var_name in self.fields:
                 print("global variable " + var_name + " has been defined twice")
@@ -399,26 +411,25 @@ class Visitor(LanguageVisitor):
                 if common_cast_type(expr_type, var_type) != var_type:
                     print("Can't assign " + type_to_string(expr_type) + " to the " +
                           type_to_string(var_type) + " variable " + var_name + ". Use explicit cast.")
-                method = self.current_method
-                if self.main_class is not None:
-                    method.code.append("aload_0")
-                    stack_limit += 1
-                method.code += expr_code
-                if expr_type < var_type:
-                    method.code.append(letter(expr_type) + '2' + letter(var_type))
+
                 if self.main_class is None:
-                    method.code.append("putstatic " + self.classname + '/' + var_name +
-                                       ' ' + type_to_string(var_type))
+                    code = CodeNode("putstatic " + self.classname + '/' + var_name + ' ' + type_to_string(var_type),
+                                    children=[expr_code])
                 else:
-                    method.code.append("putfield " + self.classname + '/' + var_name +
-                                       ' ' + type_to_string(var_type))
+                    code = CodeNode("putfield " + self.classname + '/' + var_name + ' ' + type_to_string(var_type),
+                                    children=[CodeNode("aload_0"), expr_code])
+                    stack_limit += 1
+                if expr_type < var_type:
+                    code.code = [letter(expr_type) + '2' + letter(var_type), code.code[0]]
+
+                method.code.children.append(code)
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
         else:
-            # add var
+            # add local var
+            # TODO: unnecessary  assignment
             if self.is_visible(var_name):
                 print("local variable " + var_name + " has been defined twice")
                 exit(0)
-            method = self.current_method
             var_number = len(method.locals)
             method.locals += [var_type] * type_len(var_type)
             self.visible_vars[-1][var_name] = var_number
@@ -427,10 +438,11 @@ class Visitor(LanguageVisitor):
                 if common_cast_type(expr_type, var_type) != var_type:
                     print("Can't assign " + type_to_string(expr_type) + " to the " +
                           type_to_string(var_type) + " variable " + var_name + ". Use explicit cast.")
-                method.code += expr_code
+                code = CodeNode(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number),
+                                children=[expr_code])
                 if expr_type < var_type:
-                    method.code.append(letter(expr_type) + '2' + letter(var_type))
-                method.code.append(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number))
+                    code.code = [letter(expr_type) + '2' + letter(var_type), code.code[0]]
+                method.code.children.append(code)
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
 
     # everything about expressions
@@ -812,17 +824,18 @@ class Visitor(LanguageVisitor):
                 print("Wrong " + str(i + 1) + suffix + " argument type for " + func_name + ".")
                 exit(0)
         if method.return_type != VOID:
-            stack_limit = max(stack_limit, 1)  # if there no arguments, but we need place to put return value
-        code = CodeNode()
+            # if there no arguments, but we need to put return value
+            stack_limit = max(stack_limit, type_len(method.return_type))
+
         if self.main_class is not None and func_name in self.methods:
-            code.children.append(CodeNode('aload_0'))
-            command = "invokevirtual "
+            code = CodeNode("invokevirtual " + classname + '/' + func_name + '(' +
+                            "".join([type_to_string(i) for i in arg_types]) + ')' + type_to_string(method.return_type),
+                            children=[CodeNode('aload_0'), *arg_codes])
         else:
-            command = "invokestatic "
-        code.children += arg_codes
-        
-        code.code = [command + classname + '/' + func_name + '(' + "".join([type_to_string(i) for i in arg_types]) +
-                     ')' + type_to_string(method.return_type)]
+            code = CodeNode("invokestatic " + classname + '/' + func_name + '(' +
+                            "".join([type_to_string(i) for i in arg_types]) + ')' + type_to_string(method.return_type),
+                            children=arg_codes)
+
         return method.return_type, code, stack_limit
 
     def visitCallArguments(self, ctx: LanguageParser.CallArgumentsContext):
@@ -843,22 +856,30 @@ class Visitor(LanguageVisitor):
         if expr_type == STRING:
             print("Can't cast string to boolean ")
             exit(0)
-        if expr_type not in PRIMITIVE:
-            expr_code += [letter(expr_type) + 'const_0', letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else '')]
-        cur_method = self.current_method
-        cur_method.stack_limit = max(cur_method.stack_limit, stack_limit)
+
+        method = self.current_method
+        method.stack_limit = max(method.stack_limit, stack_limit)
+
         false_label = "Label" + str(get_next_label_num())
-        cur_method.code += expr_code
-        cur_method.code.append("ifeq " + false_label)
+
+        code = CodeNode(children=[expr_code])
+        if expr_type not in PRIMITIVE:
+            code.children.append(CodeNode(letter(expr_type) + 'const_0',
+                                          letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else '')))
+        code.children.append(CodeNode("ifeq " + false_label))
+        method.code.children.append(code)
+
         self.visitBlock(ctx.getChild(2))
+
         if ctx.getChildCount() > 3:
             exit_label = "Label" + str(get_next_label_num())
-            cur_method.code.append("goto " + exit_label)
-            cur_method.code.append(false_label + ":")
+            method.code.children.append(CodeNode("goto " + exit_label, false_label + ":"))
+
             self.visitBlock(ctx.getChild(4))
-            cur_method.code.append(exit_label + ":")
+
+            method.code.children.append(CodeNode(exit_label + ":"))
         else:
-            cur_method.code.append(false_label + ":")
+            method.code.children.append(CodeNode(false_label + ":"))
 
     def visitTreadCall(self, ctx: LanguageParser.TreadCallContext):
         thread_name = ctx.getChild(0).getText()
@@ -866,14 +887,15 @@ class Visitor(LanguageVisitor):
             print("Unknown thread: " + thread_name)
             exit(0)
         main_class_name = self.classname if self.main_class is None else self.main_class.classname
-        self.current_method.code += ['new java/lang/Thread',
-                                     'dup',
-                                     'new ' + main_class_name + '$' + thread_name,
-                                     'dup',
-                                     'invokespecial ' + main_class_name + '$' + thread_name + '/<init>()V',
-                                     'invokespecial java/lang/Thread/<init>(Ljava/lang/Runnable;)V',
-                                     'invokevirtual java/lang/Thread/start()V']
-        self.current_method.stack_limit = max(self.current_method.stack_limit, 4)
+        method = self.current_method
+        method.code.children.append(CodeNode('new java/lang/Thread',
+                                             'dup',
+                                             'new ' + main_class_name + '$' + thread_name,
+                                             'dup',
+                                             'invokespecial ' + main_class_name + '$' + thread_name + '/<init>()V',
+                                             'invokespecial java/lang/Thread/<init>(Ljava/lang/Runnable;)V',
+                                             'invokevirtual java/lang/Thread/start()V'))
+        method.stack_limit = max(self.current_method.stack_limit, 4)
 
     def visitFunctionDeclaration(self, ctx: LanguageParser.FunctionDeclarationContext):
         func_type = self.visitFuncType(ctx.getChild(0))
@@ -936,9 +958,11 @@ class Visitor(LanguageVisitor):
         expr_type = type_to_string(expr_type)
         method = self.current_method
         method.stack_limit = max(method.stack_limit, stack_limit + 1)
-        return ['getstatic java/lang/System/out Ljava/io/PrintStream;'] + expr_code + \
-               ['invokevirtual java/io/PrintStream/print' + ('' if ctx.getChild(0).getText() == 'write' else 'ln') +
-                '(' + expr_type + ')V']
+        method.code.children.append(CodeNode('invokevirtual java/io/PrintStream/print' +
+                                             ('' if ctx.getChild(0).getText() == 'write' else 'ln') +
+                                             '(' + expr_type + ')V',
+                                             children=[CodeNode('getstatic java/lang/System/out Ljava/io/PrintStream;'),
+                                                       expr_code]))
 
     def visitReturnValue(self, ctx: LanguageParser.ReturnValueContext):
         method = self.current_method
@@ -947,15 +971,14 @@ class Visitor(LanguageVisitor):
             if method.return_type != VOID:
                 print("Function can not return void value")
                 exit(0)
-            method.code.append("return")
+            method.code.children.append(CodeNode("return"))
         else:
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
             if ret_type != expr_type and (ret_type not in PRIMITIVE or expr_type not in PRIMITIVE):
                 print("Wrong return type for function")
                 exit(0)
             method.stack_limit = max(method.stack_limit, stack_limit)
-            expr_code.append("ireturn" if ret_type in PRIMITIVE else "areturn" if ret_type == STRING else None)
-            method.code += expr_code
+            method.code.children.append(CodeNode(letter(expr_type) + "return", children=[expr_code]))
 
     def visitFunction(self, ctx: LanguageParser.FunctionContext):
         return super().visitFunction(ctx)
@@ -1005,78 +1028,69 @@ class Visitor(LanguageVisitor):
             exit(0)
         if expr_type not in PRIMITIVE:
             expr_code += [letter(expr_type) + 'const_0', letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else '')]
-        cur_method = self.current_method
-        cur_method.stack_limit = max(cur_method.stack_limit, stack_limit)
+        method = self.current_method
+        method.stack_limit = max(method.stack_limit, stack_limit)
         start_label = "Label" + str(get_next_label_num())
         exit_label = "Label" + str(get_next_label_num())
-        cur_method.code.append(start_label + ":")
-        cur_method.code += expr_code
-        cur_method.code.append("ifeq " + exit_label)
+
+        method.code.children.append(CodeNode(start_label + ":"))
+        method.code.children.append(expr_code)
+        method.code.children.append(CodeNode("ifeq " + exit_label))
         self.visitBlock(ctx.getChild(2))
-        cur_method.code.append("goto " + start_label)
-        cur_method.code.append(exit_label + ":")
+        method.code.children.append(CodeNode("goto " + start_label, exit_label + ":"))
 
     def visitRead(self, ctx: LanguageParser.ReadContext):
         self.has_reader = True
         var_name = ctx.getChild(1).getText()
+        
         classname = self.classname if self.main_class is None else self.main_class.classname
         if self.is_visible(var_name):
             var_num = self.get_var_number(var_name)
             var_type = self.current_method.locals[var_num]
+            code = CodeNode("getstatic " + classname + " Sc Ljava/util/Scanner;")
         elif var_name in self.fields:
             var_type = self.fields[var_name]
             classname = self.classname
             if self.main_class is not None:
-                self.current_method.code.append("aload_0")
+                code = CodeNode("aload_0", "getstatic " + classname + " Sc Ljava/util/Scanner;")
+            else:
+                code = CodeNode("getstatic " + classname + " Sc Ljava/util/Scanner;")
         elif self.main_class is not None and var_name in self.main_class.fields:
             var_type = self.main_class.fields[var_name]
             classname = self.main_class.classname
+            code = CodeNode("getstatic " + classname + " Sc Ljava/util/Scanner;")
         else:
             print("Variable " + var_name + " isn't visible")
             exit(0)
             return
-        self.current_method.code.append("getstatic " + classname + " Sc Ljava/util/Scanner;")
+
         if var_type == BOOL:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextBoolean()Z")
+            code.code.append("invokevirtual java/util/Scanner/nextBoolean()Z")
         elif var_type == INT:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextInt()I")
+            code.code.append("invokevirtual java/util/Scanner/nextInt()I")
         elif var_type == LONG:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextLong()J")
+            code.code.append("invokevirtual java/util/Scanner/nextLong()J")
         elif var_type == FLOAT:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextFloat()F")
+            code.code.append("invokevirtual java/util/Scanner/nextFloat()F")
         elif var_type == DOUBLE:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextDouble()D")
+            code.code.append("invokevirtual java/util/Scanner/nextDouble()D")
         elif var_type == STRING:
-            self.current_method.code.append("invokevirtual java/util/Scanner/nextLine()Ljava/lang/String;")
+            code.code.append("invokevirtual java/util/Scanner/nextLine()Ljava/lang/String;")
         else:
             print("Wrong type for reading")
             exit(0)
+            return
+
+        # TODO: unnecessary  assignment
         if var_name not in self.fields and var_name not in self.main_class.fields:
-            self.current_method.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
+            code.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
         elif var_name in self.fields and self.main_class is not None:
-            self.current_method.code.append("putfield " + classname + " " + var_name + " " + type_to_string(var_type))
+            code.code.append("putfield " + classname + " " + var_name + " " + type_to_string(var_type))
         else:
-            self.current_method.code.append("putstatic " + classname + " " + var_name + " " + type_to_string(var_type))
+            code.code.append("putstatic " + classname + " " + var_name + " " + type_to_string(var_type))
 
+        self.current_method.code.children.append(code)
         self.current_method.stack_limit = max(self.current_method.stack_limit, type_len(var_type), type_len(var_type))
-
-    def visitReleaseLock(self, ctx: LanguageParser.ReleaseLockContext):
-        var_name = ctx.getChild(1).getText()
-        if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
-            print("Trying to release a lock of the shadowed variable")
-            exit(0)
-        if self.main_class is None and var_name not in self.fields or self.main_class is not None \
-                and var_name not in self.main_class.fields:
-            print("No such lockable variable: " + var_name)
-            exit(0)
-        else:
-            var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
-            if var_type != STRING:
-                print("Only locks on str objects are available")
-                exit(0)
-            classname = self.classname if self.main_class is None else self.main_class.classname
-            self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         'monitorexit']
 
     def visitGetLock(self, ctx: LanguageParser.GetLockContext):
         var_name = ctx.getChild(1).getText()
@@ -1093,5 +1107,25 @@ class Visitor(LanguageVisitor):
                 print("Only locks on str objects are available")
                 exit(0)
             classname = self.classname if self.main_class is None else self.main_class.classname
-            self.current_method.code += ['getstatic ' + classname + ' ' + var_name + " Ljava/lang/String;",
-                                         'monitorenter']
+            self.current_method.code.children.append(CodeNode('getstatic ' + classname + ' ' + var_name +
+                                                              " Ljava/lang/String;",
+                                                              'monitorenter'))
+
+    def visitReleaseLock(self, ctx: LanguageParser.ReleaseLockContext):
+        var_name = ctx.getChild(1).getText()
+        if self.is_visible(var_name) or self.main_class is not None and var_name in self.fields:
+            print("Trying to release a lock of the shadowed variable")
+            exit(0)
+        if self.main_class is None and var_name not in self.fields or self.main_class is not None \
+                and var_name not in self.main_class.fields:
+            print("No such lockable variable: " + var_name)
+            exit(0)
+        else:
+            var_type = self.fields[var_name] if self.main_class is None else self.main_class.fields[var_name]
+            if var_type != STRING:
+                print("Only locks on str objects are available")
+                exit(0)
+            classname = self.classname if self.main_class is None else self.main_class.classname
+            self.current_method.code.children.append(CodeNode('getstatic ' + classname + ' ' + var_name +
+                                                              " Ljava/lang/String;",
+                                                              'monitorexit'))
