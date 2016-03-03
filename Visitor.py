@@ -633,7 +633,7 @@ class Visitor(LanguageVisitor):
                 stack_limit = max(stack_limit, next_stack_limit + type_len(common_type))
         if neg:
             if expr_type == BOOL:
-                code = CodeNode('ineg', 'iconst_1', 'iadd', children = [code])
+                code = CodeNode('ineg', 'iconst_1', 'iadd', children=[code])
                 stack_limit = max(stack_limit, 2)
             elif expr_type == INT:
                 true_label = 'Label' + str(get_next_label_num())
@@ -643,8 +643,8 @@ class Visitor(LanguageVisitor):
                 expr_type = BOOL
             else:
                 code = CodeNode(letter(expr_type) + 'const_0',
-                       letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
-                       'dup', 'imul', 'ineg', 'iconst_1', 'iadd', children=[code])
+                                letter(expr_type) + 'cmp' + ('g' if expr_type != LONG else ''),
+                                'dup', 'imul', 'ineg', 'iconst_1', 'iadd', children=[code])
                 stack_limit = max(stack_limit, 2 * type_len(expr_type))
                 expr_type = BOOL
 
@@ -1107,7 +1107,6 @@ class Visitor(LanguageVisitor):
             exit(0)
             return
 
-        # TODO: unnecessary  assignment
         if var_name not in self.fields and var_name not in self.main_class.fields:
             code.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
             if var_name in self.assignments:
