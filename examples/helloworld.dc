@@ -4,6 +4,7 @@ writeln a + 1 * 2 - 12 == 0 || false && true;
 int f(int a, str b)
 {
     a = 25;
+    a = 26;
     b = "hello";
     writeln b;
     return 1;
