@@ -28,6 +28,21 @@ CONST_TYPE = {LanguageParser.String: STRING, LanguageParser.Bool: BOOL, Language
 label_num = -1
 
 
+class CodeNode:
+    def __init__(self, *args, **kwargs):
+        self.code = list(args)
+        if 'children' in kwargs:
+            self.children = kwargs['children']
+        else:
+            self.children = []
+
+    def build_code(self):
+        code = []
+        for c in self.children:
+            code += c.build_code()
+        return code + self.code
+
+
 class Method:
     def __init__(self, return_type=-1, arguments=None, code=CodeNode(), local_constants=None, stack_limit=0):
         self.return_type = return_type
@@ -51,21 +66,6 @@ class Variable:
         self.type = var_type
         self.name = name
         self.local_number = local_number
-
-
-class CodeNode:
-    def __init__(self, *args, **kwargs):
-        self.code = list(args)
-        if 'children' in kwargs:
-            self.children = kwargs['children']
-        else:
-            self.children = []
-
-    def build_code(self):
-        code = []
-        for c in self.children:
-            code += c.build_code()
-        return code + self.code
 
 
 def type_len(var_type):
@@ -160,6 +160,7 @@ class Visitor(LanguageVisitor):
         self.has_reader = False  # if we need to keep scanner field in this class. Only possible for main class
         self.main_class = main_class  # if we are in the main class or in the thread
         self.threads = {}  # tread_name: thread code
+        self.assignments = {}  # var_name: assignment node
 
     def is_visible(self, var_name):
         for vis in self.visible_vars:
@@ -199,11 +200,12 @@ class Visitor(LanguageVisitor):
         if self.has_reader:
             code.append(".field public static Sc Ljava/util/Scanner;")
             main = self.methods['main']
-            main.code = ['new java/util/Scanner',
-                         'dup',
-                         'getstatic java/lang/System in Ljava/io/InputStream;',
-                         'invokespecial java/util/Scanner/<init>(Ljava/io/InputStream;)V',
-                         'putstatic ' + self.classname + ' Sc Ljava/util/Scanner;'] + main.code
+            main.code.children = [CodeNode('new java/util/Scanner',
+                                           'dup',
+                                           'getstatic java/lang/System in Ljava/io/InputStream;',
+                                           'invokespecial java/util/Scanner/<init>(Ljava/io/InputStream;)V',
+                                           'putstatic ' + self.classname + ' Sc Ljava/util/Scanner;'),
+                                  *main.code.children]
             main.stack_limit = max(main.stack_limit, 3)
 
         code.append("")
@@ -258,6 +260,17 @@ class Visitor(LanguageVisitor):
             code.append("")
         code.append(".end class")
         return code
+
+    def delete_assignment(self, var_name):
+        if var_name not in self.assignments:
+            return
+        code_node = self.assignments[var_name]
+        # it was read or declaration or assignment not in expression
+        if len(code_node.code) != 2:
+            code_node.code[-1] = "pop" + ("2" if code_node.code[-1][0] in ('l', 'd') else "")
+        # it was assignment in expression
+        else:
+            code_node.code = []
 
     def visitProgram(self, ctx: LanguageParser.ProgramContext):
         for i in range(ctx.getChildCount()):
@@ -330,7 +343,6 @@ class Visitor(LanguageVisitor):
             expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(2))
 
         if self.is_visible(var_name):
-            # TODO: unnecessary  assignment
             var_number = self.get_var_number(var_name)
             var_type = self.current_method.locals[var_number]
             if var_type == UNION:
@@ -353,9 +365,13 @@ class Visitor(LanguageVisitor):
             code = CodeNode("dup" + ("2" if var_type in LONG_TYPES else ""),
                             letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number),
                             children=[expr_code])
+            if var_name in self.assignments:
+                print("Warnig: variable {} has not been used between two assignments".format(var_name))
+                self.delete_assignment(var_name)
+            self.assignments[var_name] = code
             if var_type != expr_type:
                 code.children.append(CodeNode(cast(expr_type, var_type)))
-            return expr_type, expr_code, max(stack_limit, 2 * type_len(var_type))
+            return expr_type, code, max(stack_limit, 2 * type_len(var_type))
         elif var_name in self.fields or self.main_class is not None and var_name in self.main_class.fields:
             if var_field is not None:
                 print("Global variables like " + var_name + " can't be unions, so they can't have fields")
@@ -371,20 +387,20 @@ class Visitor(LanguageVisitor):
                 print("Can't assign " + type_to_string(expr_type) + " to the " +
                       type_to_string(var_type) + " variable " + var_name)
 
-
+            stack_limit = max(stack_limit, 2 * type_len(var_type))
             if var_name in self.fields and self.main_class is not None:
-                code = CodeNode("putfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
-                                "getfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                code = CodeNode("dup" + ("2" if var_type in LONG_TYPES else ""),
+                                "putfield " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
                                 children=[CodeNode("aload_0"), expr_code])
                 stack_limit += 1
             else:
-                code = CodeNode("putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
-                                "getstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
+                code = CodeNode("dup" + ("2" if var_type in LONG_TYPES else ""),
+                                "putstatic " + classname + ' ' + var_name + ' ' + type_to_string(var_type),
                                 children=[expr_code])
 
             if var_type != expr_type:
                 code.children.append(CodeNode(cast(expr_type, var_type)))
-            return expr_type, expr_code, stack_limit
+            return expr_type, code, stack_limit
         else:
             print("No such visible variable: " + var_name)
             exit(0)
@@ -426,7 +442,6 @@ class Visitor(LanguageVisitor):
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
         else:
             # add local var
-            # TODO: unnecessary  assignment
             if self.is_visible(var_name):
                 print("local variable " + var_name + " has been defined twice")
                 exit(0)
@@ -441,9 +456,10 @@ class Visitor(LanguageVisitor):
                 code = CodeNode(letter(var_type) + "store" + (' ' if var_number > 3 else '_') + str(var_number),
                                 children=[expr_code])
                 if expr_type < var_type:
-                    code.code = [letter(expr_type) + '2' + letter(var_type), code.code[0]]
+                    code.children.append(CodeNode(cast(expr_type, var_type)))
                 method.code.children.append(code)
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
+                self.assignments[var_name] = code
 
     # everything about expressions
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
@@ -767,6 +783,8 @@ class Visitor(LanguageVisitor):
                     exit(0)
                 else:
                     var_type = self.unions[var_name][var_field]
+            if var_name in self.assignments:
+                self.assignments.pop(var_name)
 
             code = letter(var_type) + 'load' + (' ' if var_number > 3 else '_') + str(var_number)
             return var_type, CodeNode(code), type_len(var_type)
@@ -918,14 +936,18 @@ class Visitor(LanguageVisitor):
             print("wrong arguments for " + func_name + " function definition")
             exit(0)
         prev_method = self.current_method
-        self.methods[func_name] = self.current_method = Method(func_type, func_arguments, [])
+        self.methods[func_name] = self.current_method = Method(func_type, func_arguments, CodeNode())
         self.set_method_params(func_arguments)
 
         self.visitBlock(ctx.getChild(5))
         if func_type == VOID:
             self.current_method.code.append("return")
 
-        self.visible_vars.pop()  # we put one level while setting method params
+        last_layer = self.visible_vars.pop()
+        for var in last_layer:
+            if var in self.assignments:
+                print("Warning: variable {} has never been used after had been assigned".format(var))
+                self.delete_assignment(var)  # we put one level while setting method params
         self.current_method = prev_method
 
     def visitFuncType(self, ctx: LanguageParser.FuncTypeContext):
@@ -951,7 +973,11 @@ class Visitor(LanguageVisitor):
         self.visible_vars.append({})
         for i in range(1, ctx.getChildCount() - 1):
             ctx.getChild(i).accept(self)
-        self.visible_vars.pop()
+        last_layer = self.visible_vars.pop()
+        for var in last_layer:
+            if var in self.assignments:
+                print("Warning: variable {} has never been used after had been assigned".format(var))
+                self.delete_assignment(var)
 
     def visitWrite(self, ctx: LanguageParser.WriteContext):
         expr_type, expr_code, stack_limit = self.visitExpression(ctx.getChild(1))
@@ -1084,6 +1110,10 @@ class Visitor(LanguageVisitor):
         # TODO: unnecessary  assignment
         if var_name not in self.fields and var_name not in self.main_class.fields:
             code.code.append(letter(var_type) + "store" + ("_" if var_num < 4 else " ") + str(var_num))
+            if var_name in self.assignments:
+                print("Warnig: variable {} has not been used between two assignments".format(var_name))
+                self.delete_assignment(var_name)
+            self.assignments[var_name] = code
         elif var_name in self.fields and self.main_class is not None:
             code.code.append("putfield " + classname + " " + var_name + " " + type_to_string(var_type))
         else:
