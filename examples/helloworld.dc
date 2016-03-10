@@ -1,18 +1,11 @@
-int a = 1;
-read a;
-writeln a + 1 * 2 - 12 == 0 || false && true;
-int f(int a, str b)
+
+int f(int a)
 {
-    a = 25;
-    a = 26;
-    b = "hello";
-    writeln b;
-    return 1;
+    while a = a - 1
+    {
+        writeln "lol";
+    }
+    return 0;
 }
-if f(7, "i") {
-    writeln "ok";
-}
-a = 1;
-while a < 10 {
-    writeln a = a + 1;
-}
+
+f(7);

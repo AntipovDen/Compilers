@@ -161,6 +161,7 @@ class Visitor(LanguageVisitor):
         self.main_class = main_class  # if we are in the main class or in the thread
         self.threads = {}  # tread_name: thread code
         self.assignments = {}  # var_name: assignment node
+        self.keep_assignments = True
 
     def is_visible(self, var_name):
         for vis in self.visible_vars:
@@ -368,7 +369,8 @@ class Visitor(LanguageVisitor):
             if var_name in self.assignments:
                 print("Warnig: variable {} has not been used between two assignments".format(var_name))
                 self.delete_assignment(var_name)
-            self.assignments[var_name] = code
+            if self.keep_assignments:
+                self.assignments[var_name] = code
             if var_type != expr_type:
                 code.children.append(CodeNode(cast(expr_type, var_type)))
             return expr_type, code, max(stack_limit, 2 * type_len(var_type))
@@ -459,7 +461,8 @@ class Visitor(LanguageVisitor):
                     code.children.append(CodeNode(cast(expr_type, var_type)))
                 method.code.children.append(code)
                 method.stack_limit = max(method.stack_limit, stack_limit, type_len(var_type))
-                self.assignments[var_name] = code
+                if self.keep_assignments:
+                    self.assignments[var_name] = code
 
     # everything about expressions
     def visitExpression(self, ctx: LanguageParser.ExpressionContext):
@@ -1064,6 +1067,10 @@ class Visitor(LanguageVisitor):
         method.code.children.append(CodeNode("ifeq " + exit_label))
         self.visitBlock(ctx.getChild(2))
         method.code.children.append(CodeNode("goto " + start_label, exit_label + ":"))
+        # here we don't need to keep assignments, but still have to warn about exsess assignments
+        self.keep_assignments = False
+        self.visitExpression(ctx.getChild(1))
+        self.keep_assignments = True
 
     def visitRead(self, ctx: LanguageParser.ReadContext):
         self.has_reader = True
@@ -1112,7 +1119,8 @@ class Visitor(LanguageVisitor):
             if var_name in self.assignments:
                 print("Warnig: variable {} has not been used between two assignments".format(var_name))
                 self.delete_assignment(var_name)
-            self.assignments[var_name] = code
+            if self.keep_assignments:
+                self.assignments[var_name] = code
         elif var_name in self.fields and self.main_class is not None:
             code.code.append("putfield " + classname + " " + var_name + " " + type_to_string(var_type))
         else:
